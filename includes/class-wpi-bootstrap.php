@@ -2,7 +2,8 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_Bootstrap {
-    const VERSION = '1.2.0';
+    const VERSION = '1.3.0';
+    const SAVE_COOKIE = 'wpi_capture_save';
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-wp-performance-inspector-bootstrap.php'; }
 
@@ -55,5 +56,51 @@ final class WPI_Bootstrap {
         $secret = (string) get_option( 'wpi_secret' );
         $sig = hash_hmac( 'sha256', $ts . '|' . $path . '|' . $exclude . '|' . $probe_id, $secret );
         return array( 'wpi_diag' => 1, 'wpi_ts' => $ts, 'wpi_sig' => $sig, 'wpi_exclude' => $exclude, 'wpi_probe' => $probe_id );
+    }
+
+    public static function save_capture_value( $user_id, $kind, $expires, $capture_id, $secret = '' ) {
+        $kind = in_array( $kind, array( 'manual', 'autosave' ), true ) ? $kind : 'manual';
+        $payload = absint( $user_id ) . '|' . absint( $expires ) . '|' . $kind . '|' . sanitize_text_field( (string) $capture_id );
+        $secret = '' !== $secret ? (string) $secret : (string) get_option( 'wpi_secret' );
+        return $payload . '|' . hash_hmac( 'sha256', $payload, $secret );
+    }
+
+    public static function parse_save_capture_value( $value, $secret = '', $now = null ) {
+        $parts = explode( '|', (string) $value );
+        if ( 5 !== count( $parts ) ) { return false; }
+        list( $user_id, $expires, $kind, $capture_id, $signature ) = $parts;
+        $now = null === $now ? time() : absint( $now );
+        if ( ! ctype_digit( $user_id ) || ! ctype_digit( $expires ) || ! in_array( $kind, array( 'manual', 'autosave' ), true ) || ! preg_match( '/^[a-f0-9-]{36}$/i', $capture_id ) || ! preg_match( '/^[a-f0-9]{64}$/', $signature ) ) { return false; }
+        if ( (int) $expires < $now || (int) $expires > $now + 15 * MINUTE_IN_SECONDS ) { return false; }
+        $payload = $user_id . '|' . $expires . '|' . $kind . '|' . $capture_id;
+        $secret = '' !== $secret ? (string) $secret : (string) get_option( 'wpi_secret' );
+        if ( ! $secret || ! hash_equals( hash_hmac( 'sha256', $payload, $secret ), $signature ) ) { return false; }
+        return array( 'user_id' => absint( $user_id ), 'expires' => absint( $expires ), 'kind' => $kind, 'capture_id' => $capture_id );
+    }
+
+    public static function save_capture_status() {
+        $value = isset( $_COOKIE[ self::SAVE_COOKIE ] ) ? wp_unslash( $_COOKIE[ self::SAVE_COOKIE ] ) : '';
+        $capture = self::parse_save_capture_value( $value );
+        return $capture && (int) $capture['user_id'] === get_current_user_id() ? $capture : false;
+    }
+
+    public static function arm_save_capture( $user_id, $kind = 'manual' ) {
+        $expires = time() + 10 * MINUTE_IN_SECONDS;
+        $capture_id = wp_generate_uuid4();
+        $value = self::save_capture_value( $user_id, $kind, $expires, $capture_id );
+        if ( ! self::set_save_cookie( $value, $expires ) ) { return new WP_Error( 'wpi_save_cookie', 'The browser capture cookie could not be set. Check that response headers have not already been sent.' ); }
+        $_COOKIE[ self::SAVE_COOKIE ] = $value;
+        return self::parse_save_capture_value( $value );
+    }
+
+    public static function clear_save_capture() {
+        self::set_save_cookie( '', time() - HOUR_IN_SECONDS );
+        unset( $_COOKIE[ self::SAVE_COOKIE ] );
+    }
+
+    private static function set_save_cookie( $value, $expires ) {
+        $options = array( 'expires' => (int) $expires, 'path' => '/', 'secure' => is_ssl(), 'httponly' => true, 'samesite' => 'Lax' );
+        if ( defined( 'COOKIE_DOMAIN' ) && COOKIE_DOMAIN ) { $options['domain'] = COOKIE_DOMAIN; }
+        return setcookie( self::SAVE_COOKIE, (string) $value, $options );
     }
 }

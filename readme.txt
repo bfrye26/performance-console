@@ -4,7 +4,7 @@ Tags: performance, database, query, profiler, diagnostics, slow queries
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.0.1
+Stable tag: 2.1.0
 License: GPLv2 or later
 
 Production-oriented WordPress diagnostics and remediation with database integrity/schema checks, slow-query attribution, plugin fault analysis, cron/cache/server inspection, RUM and production safety gates.
@@ -17,7 +17,7 @@ Database diagnostics include current-core schema comparison, missing columns/ind
 
 The Database Repair Centre can apply bounded fixes where practical, including expired transient cleanup, reversible autoload changes, rollback-backed orphan cleanup and reviewed core schema repairs. It now includes private resumable database backups and a guided maintenance-window path for large repairs, with WP-CLI retained as the preferred option for the largest tables.
 
-Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 detection, component/file/line attribution, safe EXPLAIN metadata, outbound HTTP timing and hook/phase timing. Private plugin-impact probes can exclude one plugin only for a signed diagnostic request without deactivating it for site visitors. Each A/B request is matched to its exact saved server-side PHP measurement; paired deltas, variability and a noise floor prevent ordinary request jitter from being reported as plugin cost.
+Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 detection, component/file/line attribution, safe EXPLAIN metadata, outbound HTTP timing and hook/phase timing. A one-request save profiler captures manual editor saves or autosaves and ranks measured query/HTTP work plus save-hook suspects without storing content or replaying a write. Private plugin-impact probes can exclude one plugin only for a signed diagnostic request without deactivating it for site visitors. Each A/B request is matched to its exact saved server-side PHP measurement; paired deltas, variability and a noise floor prevent ordinary request jitter from being reported as plugin cost.
 
 == Installation ==
 
@@ -29,6 +29,14 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 6. Create and verify a WPI database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
 
 == Changelog ==
+
+= 2.1.0 =
+* Added an administrator-armed capture for the next manual WordPress content save or autosave.
+* Detects classic editor, block editor REST, Quick Edit, product and custom-post-type save requests while excluding settings, media, comments and user changes.
+* Ranks directly attributed database and outbound HTTP work by component and captures exact query evidence.
+* Times save-specific hooks and labels registered callback components as suspects rather than unmeasured causes.
+* Uses a signed, ten-minute, single-use browser cookie and stores no post content, titles, field values or request bodies.
+* Never replays a write or disables a plugin during saving.
 
 = 2.0.1 =
 * Fixed plugin-impact results that could repeat the same apparent cost across unrelated plugins because whole HTTP-request variation was being attributed to the selected plugin.

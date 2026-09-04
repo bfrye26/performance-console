@@ -1,4 +1,13 @@
-# WP Performance Inspector 2.0.1
+# WP Performance Inspector 2.1.0
+
+## 2.1.0 slow-save diagnostics
+
+- Adds a one-click **Capture one real save** workflow for manual editor saves or autosaves.
+- Captures the next matching classic editor, block editor REST, Quick Edit, product, or custom-post-type save in the same administrator browser.
+- Ranks directly attributed database and outbound HTTP work by plugin/theme/core component and records exact query evidence.
+- Times save-specific WordPress hooks and lists the components registered on them as clearly labelled suspects, without claiming unmeasured callback-level attribution.
+- Uses a signed, HttpOnly, SameSite capture cookie that expires after ten minutes and disarms after one matching request; manual captures ignore autosaves.
+- Stores only safe save context such as request kind, post type and numeric ID—never post titles, content, custom-field values, or request bodies.
 
 ## 2.0.1 correlated plugin profiling
 
@@ -75,6 +84,8 @@ WP Performance Inspector is a production-oriented WordPress diagnostic and remed
 
 ### Slow queries and request profiling
 
+- one-request manual-save and autosave capture for classic, REST/block editor, Quick Edit, product and custom-post-type writes
+- save-specific hook totals plus ranked plugin/theme/core query and outbound HTTP attribution
 - low-rate sampled request timing for production trend data
 - signed deep route diagnostics for full query traces
 - normalized SQL fingerprints rather than raw SQL values by default
@@ -213,7 +224,7 @@ wp performance issues --severity=critical
 
 ## Production safety
 
-The server profiler defaults to a very small sampled fraction of traffic. Those sampled requests can collect query timings for trend analysis, while full traces/backtraces and private plugin-exclusion tests require a short-lived signed diagnostic request. Sampling can be set to zero.
+The server profiler defaults to a very small sampled fraction of traffic. Those sampled requests can collect query timings for trend analysis, while full traces/backtraces, one-request save captures and private plugin-exclusion tests require short-lived signed authorization. Sampling can be set to zero. Save capture observes the administrator's real write exactly once; it never replays that write or disables plugins during saving. Diagnostic tracing adds overhead, so save captures are for cause ranking rather than clean latency benchmarking.
 
 Large-table exact checks are skipped in ordinary web scans. Expensive integrity/orphan operations are deep-mode operations and are size-gated. Telemetry uses dedicated tables, bounded retention and low-cardinality route classes so a large publishing site does not create one metric series per article URL.
 

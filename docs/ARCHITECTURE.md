@@ -27,6 +27,11 @@ The small MU bootstrap loads early enough to:
 - privately exclude one selected plugin from the active plugin arrays for a signed A/B request
 - enable detailed query collection/backtrace capture only when needed by profiling/sampling
 - capture early WordPress/plugin bootstrap phase timing
+- validate a short-lived administrator save-capture cookie before normal plugins load and identify the next matching classic, REST, Quick Edit or autosave request
+
+Save diagnostics observe one real write and persist it as a `save` run. The cookie is signed, scoped to the arming administrator, HttpOnly, SameSite=Lax, expires after ten minutes and is cleared when a matching request begins. A manual-save capture deliberately ignores autosaves. The stored context is limited to request kind, method, user ID, post type and numeric post ID; request bodies, titles, content and field values are not persisted.
+
+Database queries and outbound HTTP calls can be attributed from their traces. Save hook duration is measured as a whole, and registered callback components are reported only as suspects because wrapping arbitrary third-party callbacks would risk changing filter/action semantics.
 
 Every plugin-impact request carries a signed probe UUID and the intended exclusion. The response echoes both, and the normal plugin persists both with the server-side PHP measurement. WPI accepts a sample only when the response and stored run match the request. Impact is the median of paired all-plugin minus excluded-plugin PHP timings; median absolute deviation establishes a per-test noise floor before WPI calls the result repeatable.
 

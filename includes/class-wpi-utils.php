@@ -282,6 +282,50 @@ final class WPI_Utils {
         );
     }
 
+    public static function save_request_context( $method = '', $uri = '', array $request = array() ) {
+        $method = strtoupper( (string) ( $method ?: ( $_SERVER['REQUEST_METHOD'] ?? 'GET' ) ) );
+        if ( ! in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) { return false; }
+        $uri = (string) ( $uri ?: ( $_SERVER['REQUEST_URI'] ?? '' ) );
+        $path = (string) strtok( $uri, '?' );
+        $request = $request ?: $_REQUEST;
+        $action = sanitize_key( (string) ( $request['action'] ?? '' ) );
+        $post_id = absint( $request['post_ID'] ?? ( $request['post_id'] ?? 0 ) );
+        $post_type = sanitize_key( (string) ( $request['post_type'] ?? '' ) );
+
+        if ( preg_match( '#/wp-admin/post\.php$#i', $path ) && in_array( $action, array( 'editpost', 'post' ), true ) ) {
+            return array( 'kind' => 'classic-editor', 'autosave' => false, 'post_id' => $post_id, 'post_type' => $post_type, 'method' => $method );
+        }
+        if ( preg_match( '#/wp-admin/admin-ajax\.php$#i', $path ) && 'inline-save' === $action ) {
+            return array( 'kind' => 'quick-edit', 'autosave' => false, 'post_id' => $post_id, 'post_type' => $post_type, 'method' => $method );
+        }
+        if ( preg_match( '#/wp-admin/admin-ajax\.php$#i', $path ) && 'autosave' === $action ) {
+            return array( 'kind' => 'classic-autosave', 'autosave' => true, 'post_id' => $post_id, 'post_type' => $post_type, 'method' => $method );
+        }
+
+        $rest_path = '';
+        if ( ! empty( $request['rest_route'] ) ) { $rest_path = '/' . ltrim( (string) $request['rest_route'], '/' ); }
+        elseif ( false !== strpos( $path, '/wp-json/' ) ) { $rest_path = substr( $path, strpos( $path, '/wp-json/' ) + 8 ); }
+        $rest_path = '/' . ltrim( rawurldecode( $rest_path ), '/' );
+        if ( preg_match( '#^/(wp/v2|wc/v3)/([a-z0-9_-]+)(?:/(\d+))?(?:/(autosaves))?/?$#i', $rest_path, $matches ) ) {
+            $resource = sanitize_key( $matches[2] );
+            if ( in_array( $resource, array( 'media', 'comments', 'users', 'settings', 'search', 'types', 'statuses', 'taxonomies' ), true ) ) { return false; }
+            $autosave = ! empty( $matches[4] );
+            return array(
+                'kind' => $autosave ? 'block-editor-autosave' : ( 'wc/v3' === strtolower( $matches[1] ) ? 'woocommerce-rest' : 'block-editor-rest' ),
+                'autosave' => $autosave,
+                'post_id' => absint( $matches[3] ?? 0 ),
+                'post_type' => $resource,
+                'method' => $method,
+            );
+        }
+        return false;
+    }
+
+    public static function save_context_matches_capture( $context, $capture_kind ) {
+        if ( ! is_array( $context ) || ! in_array( $capture_kind, array( 'manual', 'autosave' ), true ) ) { return false; }
+        return 'autosave' === $capture_kind ? ! empty( $context['autosave'] ) : empty( $context['autosave'] );
+    }
+
 
     /** Low-cardinality identity for passive production sampling. */
     public static function route_group() {

@@ -10,10 +10,11 @@ WP Performance Inspector is intentionally split between low-cost observation and
 4. Confirm the MU bootstrap is installed and current.
 5. Run a Deep Scan to collect integrity/orphan evidence. Large tables are skipped unless explicitly overridden.
 6. Profile representative uncached routes with `wp performance profile URL --runs=3`.
-7. Use `wp performance plugin-impact URL plugin/file.php --runs=3` as controlled correlation evidence, not as the sole reason to remove a plugin.
-8. Review Database Repair Centre recommendations before changing data/schema.
-9. Verify Redis/object cache, page cache and CDN behavior independently because an edge cache can bypass WordPress entirely.
-10. Compare the site before/after each meaningful change instead of applying a batch of unrelated optimizations.
+7. For slow editor writes, arm **Profiling → Slow Save Profiler**, perform one representative save in the same browser, then review measured component and hook evidence. The capture adds diagnostic overhead and should be used for cause ranking rather than absolute save latency.
+8. Use `wp performance plugin-impact URL plugin/file.php --runs=3` as controlled correlation evidence, not as the sole reason to remove a plugin.
+9. Review Database Repair Centre recommendations before changing data/schema.
+10. Verify Redis/object cache, page cache and CDN behavior independently because an edge cache can bypass WordPress entirely.
+11. Compare the site before/after each meaningful change instead of applying a batch of unrelated optimizations.
 
 ## Database repair policy
 

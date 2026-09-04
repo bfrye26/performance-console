@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 define( 'ABSPATH', __DIR__ . '/' );
 define( 'DAY_IN_SECONDS', 86400 );
+define( 'HOUR_IN_SECONDS', 3600 );
+define( 'MINUTE_IN_SECONDS', 60 );
 
 function absint( $value ) { return abs( (int) $value ); }
 function sanitize_key( $value ) { return strtolower( preg_replace( '/[^a-z0-9_-]/', '', (string) $value ) ); }
@@ -13,6 +15,7 @@ function esc_url_raw( $url, $protocols = null ) { return filter_var( $url, FILTE
 function home_url( $path = '' ) { return 'http://example.test:8080' . $path; }
 
 require_once dirname( __DIR__ ) . '/includes/class-wpi-utils.php';
+require_once dirname( __DIR__ ) . '/includes/class-wpi-bootstrap.php';
 require_once dirname( __DIR__ ) . '/includes/class-wpi-database-health.php';
 require_once dirname( __DIR__ ) . '/includes/class-wpi-profiler.php';
 
@@ -68,6 +71,29 @@ test_case( 'paired impact recognizes a stable plugin cost', static function (): 
     assert_same( 11.0, $analysis['delta'] );
     assert_same( true, $analysis['repeatable'] );
     assert_same( 'high', $analysis['confidence'] );
+} );
+
+test_case( 'save capture tokens are signed, scoped and expiring', static function (): void {
+    $id = '12345678-1234-1234-1234-123456789abc';
+    $value = WPI_Bootstrap::save_capture_value( 7, 'manual', 1600, $id, 'test-secret' );
+    $capture = WPI_Bootstrap::parse_save_capture_value( $value, 'test-secret', 1000 );
+    assert_same( 7, $capture['user_id'] );
+    assert_same( 'manual', $capture['kind'] );
+    assert_same( false, WPI_Bootstrap::parse_save_capture_value( $value . 'x', 'test-secret', 1000 ) );
+    assert_same( false, WPI_Bootstrap::parse_save_capture_value( $value, 'test-secret', 1700 ) );
+} );
+
+test_case( 'save requests distinguish manual, REST and autosave traffic', static function (): void {
+    $classic = WPI_Utils::save_request_context( 'POST', '/wp-admin/post.php', array( 'action' => 'editpost', 'post_ID' => 42, 'post_type' => 'post' ) );
+    $rest = WPI_Utils::save_request_context( 'PUT', '/wp-json/wp/v2/posts/42', array() );
+    $autosave = WPI_Utils::save_request_context( 'POST', '/wp-json/wp/v2/posts/42/autosaves', array() );
+    assert_same( 'classic-editor', $classic['kind'] );
+    assert_same( 'block-editor-rest', $rest['kind'] );
+    assert_same( 'block-editor-autosave', $autosave['kind'] );
+    assert_same( true, WPI_Utils::save_context_matches_capture( $classic, 'manual' ) );
+    assert_same( false, WPI_Utils::save_context_matches_capture( $autosave, 'manual' ) );
+    assert_same( false, WPI_Utils::save_request_context( 'GET', '/wp-json/wp/v2/posts/42', array() ) );
+    assert_same( false, WPI_Utils::save_request_context( 'POST', '/wp-json/wp/v2/settings', array() ) );
 } );
 
 test_case( 'backup primary-key discovery uses portable SHOW INDEX syntax', static function (): void {

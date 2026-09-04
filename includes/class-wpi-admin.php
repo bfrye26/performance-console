@@ -9,6 +9,7 @@ final class WPI_Admin {
         add_action( 'admin_post_wpi_expired_transients', array( __CLASS__, 'expired_transients' ) );
         add_action( 'admin_post_wpi_db_fix', array( __CLASS__, 'database_fix_post' ) );
         add_action( 'admin_post_wpi_profile', array( __CLASS__, 'profile_post' ) );
+        add_action( 'admin_post_wpi_save_capture', array( __CLASS__, 'save_capture_post' ) );
         add_action( 'admin_post_wpi_plugin_impact', array( __CLASS__, 'plugin_impact_post' ) );
         add_action( 'admin_post_wpi_settings', array( __CLASS__, 'settings_post' ) );
         add_action( 'admin_post_wpi_incident_action', array( __CLASS__, 'incident_action_post' ) );
@@ -137,6 +138,23 @@ final class WPI_Admin {
         wp_safe_redirect( admin_url( 'admin.php?page=wpi&view=profiling&profiled=1#profiling' ) ); exit;
     }
 
+    public static function save_capture_post() {
+        self::cap(); check_admin_referer( 'wpi_save_capture' );
+        $capture_action = sanitize_key( wp_unslash( $_POST['capture_action'] ?? 'arm' ) );
+        if ( 'cancel' === $capture_action ) {
+            WPI_Bootstrap::clear_save_capture();
+            $notice = array( 'ok' => true, 'message' => __( 'The pending save capture was cancelled.', 'wp-performance-inspector' ) );
+        } else {
+            $kind = sanitize_key( wp_unslash( $_POST['capture_kind'] ?? 'manual' ) );
+            $result = WPI_Bootstrap::arm_save_capture( get_current_user_id(), $kind );
+            $notice = is_wp_error( $result )
+                ? array( 'ok' => false, 'message' => $result->get_error_message() )
+                : array( 'ok' => true, 'message' => 'Capture armed. Save a post, page, product, or other content item in this browser within ten minutes.' );
+        }
+        set_transient( 'wpi_save_capture_notice_' . get_current_user_id(), $notice, 10 * MINUTE_IN_SECONDS );
+        wp_safe_redirect( admin_url( 'admin.php?page=wpi&view=profiling#save-profiling' ) ); exit;
+    }
+
     public static function plugin_impact_post() {
         self::cap(); check_admin_referer( 'wpi_plugin_impact' );
         $url = self::own_url( isset( $_POST['profile_url'] ) ? wp_unslash( $_POST['profile_url'] ) : home_url( '/' ) );
@@ -208,6 +226,13 @@ final class WPI_Admin {
         elseif ( 'reopen' === $action ) { WPI_Utils::set_incident_status( $key, 'open' ); $message = __( 'Incident reopened.', 'wp-performance-inspector' ); }
         elseif ( 'verify' === $action ) {
             WPI_Utils::set_incident_status( $key, 'verifying' );
+            if ( 'save' === (string) ( $incident['area'] ?? '' ) ) {
+                $capture = WPI_Bootstrap::arm_save_capture( get_current_user_id(), 'manual' );
+                WPI_Utils::set_incident_status( $key, 'open' );
+                if ( ! is_wp_error( $capture ) ) { set_transient( 'wpi_save_verify_' . sanitize_key( (string) $capture['capture_id'] ), $key, 15 * MINUTE_IN_SECONDS ); }
+                set_transient( 'wpi_save_capture_notice_' . get_current_user_id(), is_wp_error( $capture ) ? array( 'ok' => false, 'message' => $capture->get_error_message() ) : array( 'ok' => true, 'message' => __( 'Recheck armed. Perform one representative manual save in this browser; the incident will resolve if the slow save does not recur.', 'wp-performance-inspector' ) ), 10 * MINUTE_IN_SECONDS );
+                wp_safe_redirect( admin_url( 'admin.php?page=wpi&view=profiling#save-profiling' ) ); exit;
+            }
             $route = '';
             foreach ( (array) ( $incident['routes'] ?? array() ) as $candidate ) {
                 if ( filter_var( $candidate, FILTER_VALIDATE_URL ) ) { $route = $candidate; break; }
@@ -319,6 +344,15 @@ final class WPI_Admin {
         $counts = WPI_Utils::incident_summary();
         $open_issue_total = array_sum( $counts );
         $runs = 'profiling' === $active_view ? $wpdb->get_results( 'SELECT * FROM ' . WPI_Utils::table( 'runs' ) . ' ORDER BY id DESC LIMIT 30' ) : array(); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $save_runs = 'profiling' === $active_view ? $wpdb->get_results( "SELECT * FROM " . WPI_Utils::table( 'runs' ) . " WHERE mode='save' ORDER BY id DESC LIMIT 30" ) : array(); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        if ( $save_runs ) {
+            $save_runs = array_values( array_filter( $save_runs, static function ( $run ) {
+                $payload = json_decode( (string) $run->payload, true );
+                return get_current_user_id() === (int) ( $payload['save_context']['user_id'] ?? 0 );
+            } ) );
+            $save_runs = array_slice( $save_runs, 0, 10 );
+        }
+        $latest_save = $save_runs[0] ?? null;
         $queries = 'profiling' === $active_view ? $wpdb->get_results( 'SELECT q.*,r.route,r.created_at FROM ' . WPI_Utils::table( 'queries' ) . ' q LEFT JOIN ' . WPI_Utils::table( 'runs' ) . ' r ON r.id=q.run_id ORDER BY q.id DESC LIMIT 80' ) : array(); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $recent_run_count = 'overview' === $active_view ? (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM ' . WPI_Utils::table( 'runs' ) . ' WHERE created_at >= %s', gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS ) ) ) : 0; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $query_pattern_count = 'overview' === $active_view ? (int) $wpdb->get_var( 'SELECT COUNT(DISTINCT pattern_hash) FROM ' . WPI_Utils::table( 'queries' ) ) : 0; // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -326,6 +360,9 @@ final class WPI_Admin {
         $changes = 'monitoring' === $active_view ? $wpdb->get_results( 'SELECT * FROM ' . WPI_Utils::table( 'changes' ) . ' ORDER BY id DESC LIMIT 20', ARRAY_A ) : array(); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $profile = get_transient( 'wpi_last_profile_' . get_current_user_id() );
         $impact = get_transient( 'wpi_last_impact_' . get_current_user_id() );
+        $save_capture_status = 'profiling' === $active_view ? WPI_Bootstrap::save_capture_status() : array();
+        $save_capture_notice = get_transient( 'wpi_save_capture_notice_' . get_current_user_id() );
+        if ( false !== $save_capture_notice ) { delete_transient( 'wpi_save_capture_notice_' . get_current_user_id() ); }
         $repair_notice_key = 'wpi_last_db_repair_' . get_current_user_id();
         $repair_result = get_transient( $repair_notice_key );
         // Repair results are flash notices. Keeping an old database error for ten minutes made
@@ -554,7 +591,44 @@ final class WPI_Admin {
 
         <?php if ( 'profiling' === $active_view ): ?>
         <section class="wpi-view" data-wpi-view="profiling" id="wpi-view-profiling">
-        <div class="wpi-view-heading"><h2>Request profiling</h2><p>Measure public routes with signed private requests, then isolate plugin, database and outbound HTTP cost.</p></div>
+        <div class="wpi-view-heading"><h2>Request profiling</h2><p>Capture a real WordPress save or measure public routes, then isolate plugin, database, hook and outbound HTTP cost.</p></div>
+        <h2 id="save-profiling">Slow Save Profiler</h2>
+        <?php if ( $save_capture_notice ): ?><div class="notice <?php echo ! empty( $save_capture_notice['ok'] ) ? 'notice-success' : 'notice-error'; ?> inline" role="status"><p><?php echo esc_html( $save_capture_notice['message'] ?? '' ); ?></p></div><?php endif; ?>
+        <div class="wpi-box wpi-save-capture">
+            <div class="wpi-save-capture__intro">
+                <div><h3>Capture one real save</h3><p>Arm the profiler, save content in this browser, then return here. WPI records timings and safe identifiers only; it does not store titles, content, field values, or request bodies.</p></div>
+                <?php if ( $save_capture_status ): ?>
+                    <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post"><input type="hidden" name="action" value="wpi_save_capture"><input type="hidden" name="capture_action" value="cancel"><?php wp_nonce_field( 'wpi_save_capture' ); ?><button class="button">Cancel capture</button></form>
+                <?php else: ?>
+                    <form class="wpi-form-row" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post"><input type="hidden" name="action" value="wpi_save_capture"><input type="hidden" name="capture_action" value="arm"><?php wp_nonce_field( 'wpi_save_capture' ); ?><label>Capture type<select name="capture_kind"><option value="manual">Next manual save</option><option value="autosave">Next autosave</option></select></label><button class="button button-primary">Arm save capture</button></form>
+                <?php endif; ?>
+            </div>
+            <?php if ( $save_capture_status ): ?>
+                <div class="wpi-section-note"><span class="dashicons dashicons-controls-play" aria-hidden="true"></span><div><strong>Waiting for the next <?php echo esc_html( $save_capture_status['kind'] ); ?> save.</strong><br>Expires <?php echo esc_html( wp_date( 'M j, Y g:i:s a T', (int) $save_capture_status['expires'] ) ); ?>. Manual capture ignores autosaves, media uploads, settings changes, comments, and user updates.</div></div>
+            <?php else: ?>
+                <ol class="wpi-save-steps"><li>Choose manual save or autosave and arm the capture.</li><li>Open an existing post, page, product, or custom post type in the same browser and save it once.</li><li>Return to this report. The capture disarms itself after the matching request.</li></ol>
+            <?php endif; ?>
+            <p class="description">Diagnostic tracing adds some overhead, so use the result to rank causes—not as a clean end-user latency benchmark. WPI never replays a write or disables a plugin during saving.</p>
+        </div>
+
+        <?php if ( $latest_save ): $latest_payload = json_decode( (string) $latest_save->payload, true ); $save_context = (array) ( $latest_payload['save_context'] ?? array() ); $save_components = (array) ( $latest_payload['save_components'] ?? array() ); $save_hooks = (array) ( $latest_payload['save_hook_components'] ?? array() ); $save_severity = (float) $latest_save->php_ms >= 1500 ? 'critical' : ( (float) $latest_save->php_ms >= 750 ? 'high' : ( (float) $latest_save->php_ms >= 500 ? 'warning' : 'good' ) ); ?>
+        <div class="wpi-save-report" aria-labelledby="wpi-latest-save-heading">
+            <div class="wpi-save-report__header"><div><h3 id="wpi-latest-save-heading">Latest captured save</h3><p><?php echo esc_html( trim( (string) ( $save_context['post_type'] ?? 'content' ) . ' · ' . (string) ( $save_context['kind'] ?? 'save' ) ) ); ?><?php if ( ! empty( $save_context['post_id'] ) ): ?> · ID <?php echo intval( $save_context['post_id'] ); ?><?php endif; ?> · <?php echo esc_html( $latest_save->created_at ); ?> UTC</p></div><span class="wpi-status wpi-status--<?php echo esc_attr( $save_severity ); ?>"><?php echo esc_html( 'good' === $save_severity ? 'Quick capture' : $save_severity ); ?></span></div>
+            <dl class="wpi-save-metrics"><div><dt>PHP time</dt><dd><?php echo esc_html( round( (float) $latest_save->php_ms, 1 ) ); ?> ms</dd></div><div><dt>Database time</dt><dd><?php echo esc_html( round( (float) $latest_save->db_ms, 1 ) ); ?> ms</dd></div><div><dt>Queries</dt><dd><?php echo intval( $latest_save->query_count ); ?></dd></div><div><dt>Outbound HTTP</dt><dd><?php echo esc_html( round( (float) $latest_save->http_ms, 1 ) ); ?> ms / <?php echo intval( $latest_save->http_count ); ?></dd></div><div><dt>Peak memory</dt><dd><?php echo esc_html( size_format( (int) $latest_save->memory_peak ) ); ?></dd></div></dl>
+            <p class="wpi-save-verdict wpi-save-verdict--<?php echo esc_attr( $save_severity ); ?>"><strong><?php echo (float) $latest_save->php_ms < 500 ? 'This save completed quickly in the captured PHP request.' : ( (float) $latest_save->php_ms < 750 ? 'This save was somewhat slow; compare another capture before changing the site.' : 'This save was slow enough to investigate.' ); ?></strong> Database and HTTP rows below are directly attributed. Hook components are suspects registered on the measured hook, not per-callback timing.</p>
+
+            <h4>Measured component work</h4>
+            <?php if ( ! $save_components ): ?><div class="wpi-empty">No database or outbound HTTP work could be attributed to a component in this capture. Use the hook evidence below.</div><?php else: ?>
+            <table class="widefat striped wpi-responsive-table"><thead><tr><th>Component</th><th>Query work</th><th>HTTP work</th><th>Measured total</th></tr></thead><tbody><?php foreach ( $save_components as $component ): ?><tr><td data-label="Component"><code><?php echo esc_html( $component['component'] ?? 'core:wordpress' ); ?></code></td><td data-label="Query work"><?php echo esc_html( round( (float) ( $component['query_ms'] ?? 0 ), 1 ) . ' ms / ' . (int) ( $component['query_count'] ?? 0 ) ); ?></td><td data-label="HTTP work"><?php echo esc_html( round( (float) ( $component['http_ms'] ?? 0 ), 1 ) . ' ms / ' . (int) ( $component['http_count'] ?? 0 ) ); ?></td><td data-label="Measured total"><strong><?php echo esc_html( round( (float) ( $component['total_ms'] ?? 0 ), 1 ) ); ?> ms</strong></td></tr><?php endforeach; ?></tbody></table>
+            <?php endif; ?>
+
+            <h4>Save hooks and callback suspects</h4>
+            <?php if ( ! $save_hooks ): ?><div class="wpi-empty">No timed save hook completed during this capture.</div><?php else: ?>
+            <table class="widefat striped wpi-responsive-table"><thead><tr><th>Hook</th><th>Total hook time</th><th>Registered component suspects</th></tr></thead><tbody><?php foreach ( array_slice( $save_hooks, 0, 20 ) as $hook ): ?><tr><td data-label="Hook"><code><?php echo esc_html( $hook['hook'] ?? '' ); ?></code></td><td data-label="Total hook time"><strong><?php echo esc_html( round( (float) ( $hook['ms'] ?? 0 ), 1 ) ); ?> ms</strong></td><td data-label="Component suspects"><?php $suspects = array(); foreach ( (array) ( $hook['components'] ?? array() ) as $name => $count ) { $suspects[] = $name . ' (' . (int) $count . ')'; } echo esc_html( $suspects ? implode( ', ', $suspects ) : 'WordPress core only' ); ?></td></tr><?php endforeach; ?></tbody></table>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+
         <h2>Deep Route Profiler</h2>
         <div class="wpi-box"><form class="wpi-form-row" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post"><input type="hidden" name="action" value="wpi_profile"><?php wp_nonce_field('wpi_profile'); ?>
         <?php $profile_url = isset( $_GET['profile_url'] ) && WPI_Utils::same_origin_url( wp_unslash( $_GET['profile_url'] ) ) ? esc_url_raw( wp_unslash( $_GET['profile_url'] ) ) : home_url('/'); ?>
@@ -597,7 +671,7 @@ final class WPI_Admin {
                 </div>
                 <?php if ( $routes ): ?><details class="wpi-incident__routes"><summary>View affected routes and evidence</summary><div><ul><?php foreach ( array_slice( $routes, 0, 25 ) as $route ): ?><li><code><?php echo esc_html( $route ); ?></code></li><?php endforeach; ?></ul><?php if(count($routes)>25): ?><p><?php echo esc_html( number_format_i18n( count($routes)-25 ) ); ?> additional route(s) are grouped into this incident.</p><?php endif; ?></div></details><?php endif; ?>
                 <footer class="wpi-incident__actions">
-                    <?php if ( $representative ): ?><a class="button button-primary" href="<?php echo esc_url( add_query_arg( array( 'page'=>'wpi','view'=>'profiling','profile_url'=>$representative ), admin_url('admin.php') ) . '#profiling' ); ?>">Profile representative route</a><?php elseif ( 'database' === $incident['area'] ): ?><a class="button button-primary" href="<?php echo esc_url( admin_url('admin.php?page=wpi&view=database#database') ); ?>">Open database diagnostics</a><?php else: ?><a class="button button-primary" href="<?php echo esc_url( admin_url('admin.php?page=wpi&view=profiling#profiling') ); ?>">Open profiling tools</a><?php endif; ?>
+                    <?php if ( 'save' === $incident['area'] ): ?><a class="button button-primary" href="<?php echo esc_url( admin_url('admin.php?page=wpi&view=profiling#save-profiling') ); ?>">Capture another save</a><?php elseif ( $representative ): ?><a class="button button-primary" href="<?php echo esc_url( add_query_arg( array( 'page'=>'wpi','view'=>'profiling','profile_url'=>$representative ), admin_url('admin.php') ) . '#profiling' ); ?>">Profile representative route</a><?php elseif ( 'database' === $incident['area'] ): ?><a class="button button-primary" href="<?php echo esc_url( admin_url('admin.php?page=wpi&view=database#database') ); ?>">Open database diagnostics</a><?php else: ?><a class="button button-primary" href="<?php echo esc_url( admin_url('admin.php?page=wpi&view=profiling#profiling') ); ?>">Open profiling tools</a><?php endif; ?>
                     <form action="<?php echo esc_url( admin_url('admin-post.php') ); ?>" method="post"><input type="hidden" name="action" value="wpi_incident_action"><input type="hidden" name="incident_key" value="<?php echo esc_attr( $incident['incident_key'] ); ?>"><?php wp_nonce_field( 'wpi_incident_' . $incident['incident_key'] ); ?><button class="button" name="incident_action" value="verify">Recheck now</button><button class="button" name="incident_action" value="snooze">Snooze 7 days</button><button class="button" name="incident_action" value="resolve">Mark resolved</button><button class="button-link" name="incident_action" value="accept">Accept risk</button></form>
                 </footer>
             </article>
@@ -616,11 +690,11 @@ final class WPI_Admin {
         <?php if ( 'profiling' === $active_view ): ?>
         <section class="wpi-view" data-wpi-view="profiling">
         <h2>Recent Request Samples</h2><table class="widefat striped"><thead><tr><th>ID</th><th>Time</th><th>Mode</th><th>Variant</th><th>Route</th><th>PHP</th><th>DB</th><th>Queries</th><th>HTTP</th><th>Memory</th><th>Phases / hooks</th></tr></thead><tbody>
-        <?php foreach($runs as $r): $payload=json_decode($r->payload,true); ?><tr><td><?php echo (int)$r->id; ?></td><td><?php echo esc_html($r->created_at); ?></td><td><?php echo esc_html($r->mode); ?></td><td><?php echo esc_html(!empty($r->excluded_plugin)?'without '.$r->excluded_plugin:'all plugins'); ?></td><td><code><?php echo esc_html($r->route); ?></code></td><td><?php echo esc_html($r->php_ms.' ms'); ?></td><td><?php echo esc_html($r->db_ms.' ms'); ?></td><td><?php echo (int)$r->query_count; ?></td><td><?php echo esc_html($r->http_ms.' ms / '.(int)$r->http_count); ?></td><td><?php echo esc_html(size_format((int)$r->memory_peak)); ?></td><td><small><?php echo esc_html(self::top_timings($payload)); ?></small></td></tr><?php endforeach; ?>
+        <?php foreach($runs as $r): $payload=json_decode($r->payload,true); ?><tr><td><?php echo (int)$r->id; ?></td><td><?php echo esc_html($r->created_at); ?></td><td><?php echo esc_html($r->mode); ?></td><td><?php echo esc_html('save'===$r->mode?'captured save':(!empty($r->excluded_plugin)?'without '.$r->excluded_plugin:'all plugins')); ?></td><td><code><?php echo esc_html($r->route); ?></code></td><td><?php echo esc_html($r->php_ms.' ms'); ?></td><td><?php echo esc_html($r->db_ms.' ms'); ?></td><td><?php echo (int)$r->query_count; ?></td><td><?php echo esc_html($r->http_ms.' ms / '.(int)$r->http_count); ?></td><td><?php echo esc_html(size_format((int)$r->memory_peak)); ?></td><td><small><?php echo esc_html(self::top_timings($payload)); ?></small></td></tr><?php endforeach; ?>
         </tbody></table>
 
         <h2>Captured Slow / Repeated Queries</h2><table class="widefat striped"><thead><tr><th>Run</th><th>Component</th><th>Calls</th><th>Total / max</th><th>Query</th><th>EXPLAIN analysis</th></tr></thead><tbody>
-        <?php if(!$queries): ?><tr><td colspan="6">Profile a route to capture attributed query patterns.</td></tr><?php endif; ?>
+        <?php if(!$queries): ?><tr><td colspan="6">Profile a route or capture a save to collect attributed query patterns.</td></tr><?php endif; ?>
         <?php foreach($queries as $q): $ex=json_decode($q->explain_json,true); $cand=$ex['analysis']['index_candidate']??array(); ?><tr><td>#<?php echo intval($q->run_id); ?><br><small><?php echo esc_html($q->created_at); ?></small></td><td><?php echo esc_html($q->component_type.':'.$q->component_slug); ?><br><small><?php echo esc_html($q->source_file); ?><?php echo $q->source_line?':'.intval($q->source_line):''; ?></small></td><td><?php echo intval($q->count); ?></td><td><?php echo esc_html($q->total_ms.' / '.$q->max_ms.' ms'); ?></td><td><code><?php echo esc_html(mb_substr($q->normalized_sql,0,1000)); ?></code></td><td><small><?php echo esc_html(implode('; ',(array)($ex['analysis']['reasons']??array()))); ?></small><?php if(!empty($cand['sql'])): ?><br><strong>Review-only index candidate:</strong><br><code><?php echo esc_html($cand['sql']); ?></code><br><small><?php echo esc_html($cand['warning']??''); ?></small><?php endif; ?></td></tr><?php endforeach; ?>
         </tbody></table>
         </section>

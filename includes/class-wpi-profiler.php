@@ -49,6 +49,17 @@ final class WPI_Profiler {
             add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
             add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
         }
+        if ( defined( 'WPI_SAVE_DIAGNOSTIC' ) && WPI_SAVE_DIAGNOSTIC ) {
+            foreach ( array( 'save_post','wp_insert_post','wp_after_insert_post','post_updated','transition_post_status','added_post_meta','updated_post_meta','deleted_post_meta' ) as $hook ) {
+                add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
+                add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
+            }
+            foreach ( array( 'wp_insert_post_data','content_save_pre' ) as $hook ) {
+                add_filter( $hook, array( __CLASS__, 'filter_start' ), PHP_INT_MIN );
+                add_filter( $hook, array( __CLASS__, 'filter_stop' ), PHP_INT_MAX );
+            }
+            add_action( 'init', array( __CLASS__, 'register_dynamic_save_timers' ), PHP_INT_MAX - 1 );
+        }
     }
 
     public static function hook_start() {
@@ -62,6 +73,33 @@ final class WPI_Profiler {
         if ( empty( self::$hook_starts[ $hook ] ) ) { return; }
         $start = array_pop( self::$hook_starts[ $hook ] );
         self::$hook_totals[ $hook ] = ( self::$hook_totals[ $hook ] ?? 0 ) + ( microtime( true ) - $start ) * 1000;
+    }
+
+    public static function filter_start( $value ) {
+        self::hook_start();
+        return $value;
+    }
+
+    public static function filter_stop( $value ) {
+        self::hook_stop();
+        return $value;
+    }
+
+    public static function register_dynamic_save_timers() {
+        $context = (array) ( $GLOBALS['wpi_save_capture'] ?? array() );
+        $post_type = sanitize_key( (string) ( $context['post_type'] ?? '' ) );
+        if ( ! empty( $context['post_id'] ) ) { $post_type = sanitize_key( (string) get_post_type( (int) $context['post_id'] ) ); }
+        if ( ! $post_type ) { return; }
+        foreach ( (array) get_post_types( array(), 'objects' ) as $object ) {
+            if ( $post_type === sanitize_key( (string) ( $object->rest_base ?? '' ) ) ) { $post_type = $object->name; break; }
+        }
+        $GLOBALS['wpi_save_capture']['post_type'] = $post_type;
+        foreach ( array( 'save_post_' . $post_type, 'rest_after_insert_' . $post_type ) as $hook ) {
+            add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
+            add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
+        }
+        add_filter( 'rest_pre_insert_' . $post_type, array( __CLASS__, 'filter_start' ), PHP_INT_MIN );
+        add_filter( 'rest_pre_insert_' . $post_type, array( __CLASS__, 'filter_stop' ), PHP_INT_MAX );
     }
 
     public static function http_start( $args, $url ) {
@@ -106,6 +144,9 @@ final class WPI_Profiler {
         $run_payload = array();
         $queries_by_pattern = array();
         $deep = defined( 'WPI_DEEP_DIAGNOSTIC' ) && WPI_DEEP_DIAGNOSTIC;
+        $save = defined( 'WPI_SAVE_DIAGNOSTIC' ) && WPI_SAVE_DIAGNOSTIC;
+        $save_context = (array) ( $GLOBALS['wpi_save_capture'] ?? array() );
+        if ( $save && (int) ( $save_context['user_id'] ?? 0 ) !== get_current_user_id() ) { return; }
         $trace_map = self::trace_map();
 
         if ( isset( $wpdb->queries ) && is_array( $wpdb->queries ) ) {
@@ -141,9 +182,21 @@ final class WPI_Profiler {
         $run_payload['query_timing_available'] = defined( 'SAVEQUERIES' ) && SAVEQUERIES;
         $run_payload['probe_id'] = sanitize_text_field( (string) ( $GLOBALS['wpi_probe_id'] ?? '' ) );
         $run_payload['excluded_plugin'] = sanitize_text_field( (string) ( $GLOBALS['wpi_excluded_plugin'] ?? '' ) );
+        if ( $save ) {
+            $run_payload['save_context'] = array(
+                'kind' => sanitize_key( (string) ( $save_context['kind'] ?? '' ) ),
+                'requested_kind' => sanitize_key( (string) ( $save_context['requested_kind'] ?? '' ) ),
+                'post_id' => absint( $save_context['post_id'] ?? 0 ),
+                'post_type' => sanitize_key( (string) ( $save_context['post_type'] ?? '' ) ),
+                'method' => sanitize_key( (string) ( $save_context['method'] ?? '' ) ),
+                'user_id' => get_current_user_id(),
+            );
+            $run_payload['save_components'] = self::save_component_totals( $queries_by_pattern, self::$http );
+            $run_payload['save_hook_components'] = self::save_hook_components();
+        }
 
         $wpdb->insert( WPI_Utils::table( 'runs' ), array(
-            'created_at' => WPI_Utils::now_mysql(), 'route' => $route, 'mode' => $deep ? 'deep' : 'sample',
+            'created_at' => WPI_Utils::now_mysql(), 'route' => $route, 'mode' => $save ? 'save' : ( $deep ? 'deep' : 'sample' ),
             'php_ms' => round( $php_ms, 3 ), 'db_ms' => round( $db_ms, 3 ), 'query_count' => $query_count,
             'http_ms' => round( $http_ms, 3 ), 'http_count' => count( self::$http ), 'memory_peak' => memory_get_peak_usage( true ),
             'probe_id' => $run_payload['probe_id'], 'excluded_plugin' => $run_payload['excluded_plugin'],
@@ -155,6 +208,14 @@ final class WPI_Profiler {
         WPI_Utils::begin_issue_collection( $deep ? 'manual' : 'passive', $run_id );
         if ( $deep ) { self::persist_queries( $run_id, $queries_by_pattern, $route ); }
         self::request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, $run_payload );
+        if ( $save ) {
+            $verification_key = get_transient( 'wpi_save_verify_' . sanitize_key( (string) ( $save_context['capture_id'] ?? '' ) ) );
+            if ( $verification_key ) {
+                WPI_Utils::set_incident_status( $verification_key, 'resolved' );
+                delete_transient( 'wpi_save_verify_' . sanitize_key( (string) $save_context['capture_id'] ) );
+            }
+            self::save_issue( $route, $php_ms, $db_ms, $http_ms, $run_payload );
+        }
         self::http_issues( $route );
         self::fatal_issue( $route );
         WPI_Utils::end_issue_collection();
@@ -377,6 +438,90 @@ final class WPI_Profiler {
         if ( ! empty( $analysis['index_candidate']['sql'] ) ) { $parts[] = 'WPI generated a review-only candidate index: <code>' . esc_html( $analysis['index_candidate']['sql'] ) . '</code> Test EXPLAIN and write/storage impact on staging before adding it.'; }
         $parts[] = 'If the same result repeats within one request, cache/prime it or batch the lookup.';
         return implode( ' ', $parts );
+    }
+
+    private static function save_component_totals( array $patterns, array $http ) {
+        $totals = array();
+        foreach ( $patterns as $pattern ) {
+            $component = (array) ( $pattern['component'] ?? array() );
+            $key = sanitize_key( (string) ( $component['type'] ?? 'core' ) ) . ':' . sanitize_key( (string) ( $component['slug'] ?? 'wordpress' ) );
+            if ( ! isset( $totals[ $key ] ) ) { $totals[ $key ] = array( 'component' => $key, 'query_ms' => 0, 'query_count' => 0, 'http_ms' => 0, 'http_count' => 0, 'total_ms' => 0 ); }
+            $totals[ $key ]['query_ms'] += (float) ( $pattern['total'] ?? 0 );
+            $totals[ $key ]['query_count'] += (int) ( $pattern['count'] ?? 0 );
+        }
+        foreach ( $http as $request ) {
+            $component = (array) ( $request['component'] ?? array() );
+            $key = sanitize_key( (string) ( $component['type'] ?? 'core' ) ) . ':' . sanitize_key( (string) ( $component['slug'] ?? 'wordpress' ) );
+            if ( ! isset( $totals[ $key ] ) ) { $totals[ $key ] = array( 'component' => $key, 'query_ms' => 0, 'query_count' => 0, 'http_ms' => 0, 'http_count' => 0, 'total_ms' => 0 ); }
+            $totals[ $key ]['http_ms'] += (float) ( $request['ms'] ?? 0 );
+            $totals[ $key ]['http_count']++;
+        }
+        foreach ( $totals as &$total ) {
+            $total['query_ms'] = round( $total['query_ms'], 3 );
+            $total['http_ms'] = round( $total['http_ms'], 3 );
+            $total['total_ms'] = round( $total['query_ms'] + $total['http_ms'], 3 );
+        }
+        unset( $total );
+        uasort( $totals, static function ( $a, $b ) { return $b['total_ms'] <=> $a['total_ms']; } );
+        return array_slice( array_values( $totals ), 0, 30 );
+    }
+
+    private static function callback_component( $callback ) {
+        try {
+            if ( is_array( $callback ) && 2 === count( $callback ) ) { $reflection = new ReflectionMethod( $callback[0], $callback[1] ); }
+            elseif ( is_string( $callback ) && false !== strpos( $callback, '::' ) ) { list( $class, $method ) = explode( '::', $callback, 2 ); $reflection = new ReflectionMethod( $class, $method ); }
+            elseif ( is_object( $callback ) && ! $callback instanceof Closure ) { $reflection = new ReflectionMethod( $callback, '__invoke' ); }
+            else { $reflection = new ReflectionFunction( $callback ); }
+            $file = (string) $reflection->getFileName();
+            return $file ? WPI_Utils::component_from_file( $file ) : array( 'type' => 'core', 'slug' => 'wordpress' );
+        } catch ( Throwable $e ) {
+            return array( 'type' => 'core', 'slug' => 'wordpress' );
+        }
+    }
+
+    private static function save_hook_components() {
+        global $wp_filter;
+        $out = array();
+        $fixed = array( 'save_post','wp_insert_post','wp_after_insert_post','post_updated','transition_post_status','added_post_meta','updated_post_meta','deleted_post_meta','wp_insert_post_data','content_save_pre' );
+        foreach ( self::$hook_totals as $hook => $ms ) {
+            if ( ! in_array( $hook, $fixed, true ) && 0 !== strpos( $hook, 'save_post_' ) && 0 !== strpos( $hook, 'rest_after_insert_' ) && 0 !== strpos( $hook, 'rest_pre_insert_' ) ) { continue; }
+            if ( empty( $wp_filter[ $hook ] ) || empty( $wp_filter[ $hook ]->callbacks ) ) { continue; }
+            $components = array();
+            $callbacks = 0;
+            foreach ( $wp_filter[ $hook ]->callbacks as $priority_callbacks ) {
+                foreach ( $priority_callbacks as $registered ) {
+                    $callback = $registered['function'] ?? '';
+                    if ( is_array( $callback ) && ( ( is_string( $callback[0] ) && __CLASS__ === $callback[0] ) || ( is_object( $callback[0] ) && __CLASS__ === get_class( $callback[0] ) ) ) ) { continue; }
+                    $component = self::callback_component( $callback );
+                    $key = sanitize_key( (string) ( $component['type'] ?? 'core' ) ) . ':' . sanitize_key( (string) ( $component['slug'] ?? 'wordpress' ) );
+                    $components[ $key ] = ( $components[ $key ] ?? 0 ) + 1;
+                    $callbacks++;
+                }
+            }
+            arsort( $components );
+            $out[] = array( 'hook' => sanitize_key( $hook ), 'ms' => round( $ms, 3 ), 'callbacks' => $callbacks, 'components' => $components );
+        }
+        usort( $out, static function ( $a, $b ) { return $b['ms'] <=> $a['ms']; } );
+        return $out;
+    }
+
+    private static function save_issue( $route, $php_ms, $db_ms, $http_ms, array $payload ) {
+        if ( $php_ms < 750 ) { return; }
+        $components = (array) ( $payload['save_components'] ?? array() );
+        $dominant = (array) ( $components[0] ?? array() );
+        $component = sanitize_text_field( (string) ( $dominant['component'] ?? '' ) );
+        $measured_ms = (float) ( $dominant['total_ms'] ?? 0 );
+        $context = (array) ( $payload['save_context'] ?? array() );
+        $label = trim( (string) ( $context['post_type'] ?? '' ) . ' ' . (string) ( $context['kind'] ?? '' ) );
+        $message = 'A captured ' . esc_html( $label ?: 'WordPress' ) . ' save required approximately ' . round( $php_ms ) . ' ms of PHP time.';
+        $recommendation = 'Review the captured slow-hook suspects and exact query/HTTP evidence before changing plugins.';
+        $confidence = 65;
+        if ( $component && $measured_ms >= 50 ) {
+            $message .= ' The largest directly attributed database/HTTP contributor was <code>' . esc_html( $component ) . '</code> at approximately ' . round( $measured_ms ) . ' ms.';
+            $recommendation = $http_ms >= $db_ms ? 'Move non-essential remote synchronization out of the save request, or cache/batch it.' : 'Reduce or batch the attributed save-time queries and check their EXPLAIN evidence.';
+            $confidence = 88;
+        }
+        WPI_Utils::issue( 'save', $php_ms >= 1500 ? 'critical' : 'high', 'Slow WordPress save', $message, round( $php_ms ) . ' ms PHP time', $recommendation, $route, array( 'component' => $component, 'confidence' => $confidence ) );
     }
 
     private static function request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, array $payload ) {
