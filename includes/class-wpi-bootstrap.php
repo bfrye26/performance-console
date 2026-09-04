@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_Bootstrap {
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-wp-performance-inspector-bootstrap.php'; }
 
@@ -15,12 +15,12 @@ final class WPI_Bootstrap {
     }
 
     public static function maybe_install() {
-        if ( get_transient( 'wpi_bootstrap_checked' ) ) { return; }
+        if ( self::VERSION === get_transient( 'wpi_bootstrap_checked' ) ) { return; }
         $status = self::status();
         if ( ! $status['installed'] || ! $status['current'] ) {
             self::install();
         }
-        set_transient( 'wpi_bootstrap_checked', 1, DAY_IN_SECONDS );
+        set_transient( 'wpi_bootstrap_checked', self::VERSION, DAY_IN_SECONDS );
     }
 
     public static function install() {
@@ -32,7 +32,7 @@ final class WPI_Bootstrap {
         @chmod( self::path(), 0644 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
         $legacy = self::legacy_path();
         if ( $legacy !== self::path() && file_exists( $legacy ) ) { @unlink( $legacy ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
-        set_transient( 'wpi_bootstrap_checked', 1, DAY_IN_SECONDS );
+        set_transient( 'wpi_bootstrap_checked', self::VERSION, DAY_IN_SECONDS );
         return true;
     }
 
@@ -49,11 +49,11 @@ final class WPI_Bootstrap {
         return array( 'path' => $path, 'installed' => $installed, 'current' => $current, 'version' => $version, 'writable' => is_writable( WPMU_PLUGIN_DIR ) );
     }
 
-    public static function token( $url, $exclude = '' ) {
+    public static function token( $url, $exclude = '', $probe_id = '' ) {
         $ts = time();
         $path = (string) wp_parse_url( $url, PHP_URL_PATH );
         $secret = (string) get_option( 'wpi_secret' );
-        $sig = hash_hmac( 'sha256', $ts . '|' . $path . '|' . $exclude, $secret );
-        return array( 'wpi_diag' => 1, 'wpi_ts' => $ts, 'wpi_sig' => $sig, 'wpi_exclude' => $exclude );
+        $sig = hash_hmac( 'sha256', $ts . '|' . $path . '|' . $exclude . '|' . $probe_id, $secret );
+        return array( 'wpi_diag' => 1, 'wpi_ts' => $ts, 'wpi_sig' => $sig, 'wpi_exclude' => $exclude, 'wpi_probe' => $probe_id );
     }
 }

@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_DB {
-    const DB_VERSION = '2.0.0';
+    const DB_VERSION = '2.0.1';
 
     public static function activate() {
         self::install();
@@ -108,11 +108,14 @@ final class WPI_DB {
             http_ms decimal(12,3) NOT NULL DEFAULT 0,
             http_count int unsigned NOT NULL DEFAULT 0,
             memory_peak bigint unsigned NOT NULL DEFAULT 0,
+            probe_id char(36) NOT NULL DEFAULT '',
+            excluded_plugin varchar(191) NOT NULL DEFAULT '',
             payload longtext NULL,
             PRIMARY KEY  (id),
             KEY created_at (created_at),
             KEY mode (mode),
-            KEY route (route(191))
+            KEY route (route(191)),
+            KEY probe_id (probe_id)
         ) {$charset};" );
 
         dbDelta( "CREATE TABLE {$queries} (

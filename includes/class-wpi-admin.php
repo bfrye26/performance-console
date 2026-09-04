@@ -150,24 +150,25 @@ final class WPI_Admin {
         $warmup_meta = array();
         self::timed_probe( $url, '', 1, $warmup_meta );
         self::timed_probe( $url, $plugin, 1, $warmup_meta );
-        $baseline = array(); $without = array();
+        $baseline = array(); $without = array(); $paired_deltas = array();
         for ( $pair = 0; $pair < 5; $pair++ ) {
             $first = 0 === $pair % 2 ? '' : $plugin;
             $second = '' === $first ? $plugin : '';
+            $pair_values = array( 'baseline' => null, 'without' => null );
             foreach ( array( $first, $second ) as $exclude ) {
                 $probe_meta = array();
                 $values = self::timed_probe( $url, $exclude, 1, $probe_meta );
-                if ( '' === $exclude ) { $baseline = array_merge( $baseline, $values ); self::merge_probe_meta( $baseline_meta, $probe_meta ); }
-                else { $without = array_merge( $without, $values ); self::merge_probe_meta( $without_meta, $probe_meta ); }
+                if ( '' === $exclude ) { $baseline = array_merge( $baseline, $values ); $pair_values['baseline'] = $values ? (float) $values[0] : null; self::merge_probe_meta( $baseline_meta, $probe_meta ); }
+                else { $without = array_merge( $without, $values ); $pair_values['without'] = $values ? (float) $values[0] : null; self::merge_probe_meta( $without_meta, $probe_meta ); }
             }
+            if ( null !== $pair_values['baseline'] && null !== $pair_values['without'] ) { $paired_deltas[] = round( $pair_values['baseline'] - $pair_values['without'], 3 ); }
         }
         $result = array(
             'url' => $url, 'plugin' => $plugin, 'baseline' => $baseline, 'without' => $without, 'baseline_meta' => $baseline_meta, 'without_meta' => $without_meta,
-            'baseline_median' => self::median( $baseline ), 'without_median' => self::median( $without ), 'at' => time(),
+            'baseline_median' => WPI_Utils::median( $baseline ), 'without_median' => WPI_Utils::median( $without ), 'pair_deltas' => $paired_deltas, 'at' => time(),
         );
-        $result['delta'] = round( $result['baseline_median'] - $result['without_median'], 1 );
         $result['comparable'] = self::comparable_probes( $baseline_meta, $without_meta );
-        $result['confidence'] = self::impact_confidence( $baseline, $without, $result['comparable'] );
+        $result = array_merge( $result, WPI_Utils::analyze_paired_impact( $paired_deltas, $result['comparable'] ) );
         set_transient( 'wpi_last_impact_' . get_current_user_id(), $result, 10 * MINUTE_IN_SECONDS );
         wp_safe_redirect( admin_url( 'admin.php?page=wpi&view=profiling&impact=1#profiling' ) ); exit;
     }
@@ -255,17 +256,19 @@ final class WPI_Admin {
 
     private static function timed_probe( $url, $exclude, $runs, &$meta = null ) {
         $times = array();
-        $meta = array( 'requested' => (int) $runs, 'verified' => 0, 'http_errors' => 0, 'bad_status' => 0, 'redirects' => 0, 'statuses' => array(), 'content_types' => array(), 'body_bytes' => array(), 'cache_bypassed' => true );
+        $meta = array( 'requested' => (int) $runs, 'verified' => 0, 'http_errors' => 0, 'bad_status' => 0, 'redirects' => 0, 'probe_mismatch' => 0, 'server_missing' => 0, 'statuses' => array(), 'content_types' => array(), 'body_bytes' => array(), 'wall_ms' => array(), 'php_ms' => array(), 'db_ms' => array(), 'query_counts' => array(), 'cache_bypassed' => true );
         for ( $i = 0; $i < $runs; $i++ ) {
-            $token = WPI_Bootstrap::token( $url, $exclude );
-            $probe = add_query_arg( array_merge( $token, array( 'wpi_probe' => wp_generate_uuid4() ) ), $url );
+            $probe_id = wp_generate_uuid4();
+            $token = WPI_Bootstrap::token( $url, $exclude, $probe_id );
+            $probe = add_query_arg( $token, $url );
             $start = microtime( true );
             $res = wp_remote_get( $probe, array( 'timeout' => 30, 'redirection' => 0, 'sslverify' => apply_filters( 'https_local_ssl_verify', false ), 'headers' => array( 'Cache-Control' => 'no-cache', 'Pragma' => 'no-cache' ) ) );
             $elapsed = round( ( microtime( true ) - $start ) * 1000, 1 );
             if ( is_wp_error( $res ) ) { $meta['http_errors']++; continue; }
-            $verified = '1' === trim( (string) wp_remote_retrieve_header( $res, 'x-wpi-diagnostic' ) );
-            if ( ! $verified ) { $meta['cache_bypassed'] = false; continue; }
-            $meta['verified']++;
+            $header_probe = trim( (string) wp_remote_retrieve_header( $res, 'x-wpi-probe-id' ) );
+            $header_exclude = trim( (string) wp_remote_retrieve_header( $res, 'x-wpi-excluded-plugin' ) );
+            $verified = '1' === trim( (string) wp_remote_retrieve_header( $res, 'x-wpi-diagnostic' ) ) && hash_equals( $probe_id, $header_probe ) && hash_equals( $exclude ?: 'none', $header_exclude );
+            if ( ! $verified ) { $meta['cache_bypassed'] = false; $meta['probe_mismatch']++; continue; }
             $status = (int) wp_remote_retrieve_response_code( $res );
             $meta['statuses'][] = $status;
             if ( $status >= 300 && $status < 400 ) { $meta['redirects']++; $meta['bad_status']++; continue; }
@@ -275,35 +278,32 @@ final class WPI_Admin {
             if ( strlen( $body ) < 128 || '' === $content_type ) { $meta['bad_status']++; continue; }
             $meta['body_bytes'][] = strlen( $body );
             $meta['content_types'][] = $content_type;
-            $times[] = $elapsed;
+            $server = WPI_Utils::probe_run( $probe_id, $exclude );
+            if ( ! $server ) { $meta['server_missing']++; continue; }
+            $meta['verified']++;
+            $meta['wall_ms'][] = $elapsed;
+            $meta['php_ms'][] = round( (float) $server['php_ms'], 1 );
+            $meta['db_ms'][] = round( (float) $server['db_ms'], 1 );
+            $meta['query_counts'][] = (int) $server['query_count'];
+            $times[] = round( (float) $server['php_ms'], 1 );
         }
-        sort( $times ); return $times;
+        return $times;
     }
 
-    private static function median( array $values ) { if ( ! $values ) { return 0; } sort( $values ); return (float) $values[ (int) floor( ( count( $values ) - 1 ) / 2 ) ]; }
-
     private static function merge_probe_meta( array &$target, array $source ) {
-        if ( ! $target ) { $target = array( 'requested' => 0, 'verified' => 0, 'http_errors' => 0, 'bad_status' => 0, 'redirects' => 0, 'statuses' => array(), 'content_types' => array(), 'body_bytes' => array(), 'cache_bypassed' => true ); }
-        foreach ( array( 'requested', 'verified', 'http_errors', 'bad_status', 'redirects' ) as $key ) { $target[ $key ] += (int) ( $source[ $key ] ?? 0 ); }
-        foreach ( array( 'statuses', 'content_types', 'body_bytes' ) as $key ) { $target[ $key ] = array_merge( $target[ $key ], (array) ( $source[ $key ] ?? array() ) ); }
+        if ( ! $target ) { $target = array( 'requested' => 0, 'verified' => 0, 'http_errors' => 0, 'bad_status' => 0, 'redirects' => 0, 'probe_mismatch' => 0, 'server_missing' => 0, 'statuses' => array(), 'content_types' => array(), 'body_bytes' => array(), 'wall_ms' => array(), 'php_ms' => array(), 'db_ms' => array(), 'query_counts' => array(), 'cache_bypassed' => true ); }
+        foreach ( array( 'requested', 'verified', 'http_errors', 'bad_status', 'redirects', 'probe_mismatch', 'server_missing' ) as $key ) { $target[ $key ] += (int) ( $source[ $key ] ?? 0 ); }
+        foreach ( array( 'statuses', 'content_types', 'body_bytes', 'wall_ms', 'php_ms', 'db_ms', 'query_counts' ) as $key ) { $target[ $key ] = array_merge( $target[ $key ], (array) ( $source[ $key ] ?? array() ) ); }
         $target['cache_bypassed'] = $target['cache_bypassed'] && ! empty( $source['cache_bypassed'] );
     }
 
     private static function comparable_probes( array $baseline, array $without ) {
         $base_types = array_values( array_unique( (array) ( $baseline['content_types'] ?? array() ) ) );
         $without_types = array_values( array_unique( (array) ( $without['content_types'] ?? array() ) ) );
-        $base_bytes = self::median( array_map( 'floatval', (array) ( $baseline['body_bytes'] ?? array() ) ) );
-        $without_bytes = self::median( array_map( 'floatval', (array) ( $without['body_bytes'] ?? array() ) ) );
+        $base_bytes = WPI_Utils::median( array_map( 'floatval', (array) ( $baseline['body_bytes'] ?? array() ) ) );
+        $without_bytes = WPI_Utils::median( array_map( 'floatval', (array) ( $without['body_bytes'] ?? array() ) ) );
         $size_ratio = $base_bytes > 0 ? $without_bytes / $base_bytes : 0;
         return $base_types && $base_types === $without_types && $size_ratio >= 0.65 && $size_ratio <= 1.35;
-    }
-
-    private static function impact_confidence( array $baseline, array $without, $comparable ) {
-        if ( ! $comparable || count( $baseline ) < 5 || count( $without ) < 5 ) { return 'low'; }
-        $all = array_merge( $baseline, $without );
-        $median = self::median( $all );
-        $spread = $median > 0 ? ( max( $all ) - min( $all ) ) / $median : 1;
-        return $spread <= 0.25 ? 'high' : ( $spread <= 0.6 ? 'medium' : 'low' );
     }
 
     public static function page() {
@@ -560,14 +560,14 @@ final class WPI_Admin {
         <?php $profile_url = isset( $_GET['profile_url'] ) && WPI_Utils::same_origin_url( wp_unslash( $_GET['profile_url'] ) ) ? esc_url_raw( wp_unslash( $_GET['profile_url'] ) ) : home_url('/'); ?>
         <label>Public WordPress URL<input type="url" name="profile_url" required value="<?php echo esc_attr( $profile_url ); ?>"></label><label>Measured runs<select name="runs"><option>3</option><option selected>5</option></select></label><button class="button button-primary">Profile this route</button></form>
         <p class="description">Runs a private no-cache request without following redirects. WPI verifies that WordPress handled the response before accepting the measurement.</p>
-        <?php if ( $profile ): $pm=$profile['probe_meta']??array(); ?><p><strong>Last profile:</strong> <?php echo esc_html($profile['url']); ?> &mdash; <?php if($profile['times']): ?><?php echo esc_html(implode(', ', $profile['times'])); ?> ms; median <?php echo esc_html(self::median($profile['times'])); ?> ms<?php else: ?><span class="wpi-critical">No verified diagnostic request reached WordPress. A page cache/reverse proxy may be serving before the MU profiler.</span><?php endif; ?><?php if($pm): ?> <small>(verified <?php echo intval($pm['verified']??0); ?>/<?php echo intval($pm['requested']??0); ?>)</small><?php endif; ?></p><?php endif; ?>
+        <?php if ( $profile ): $pm=$profile['probe_meta']??array(); ?><p><strong>Last profile:</strong> <?php echo esc_html($profile['url']); ?> &mdash; <?php if($profile['times']): ?>server PHP <?php echo esc_html(implode(', ', $profile['times'])); ?> ms; median <?php echo esc_html(WPI_Utils::median($profile['times'])); ?> ms<?php else: ?><span class="wpi-critical">No verified diagnostic request reached WordPress or matched its saved server measurement. Check the MU profiler and page-cache bypass.</span><?php endif; ?><?php if($pm): ?> <small>(verified <?php echo intval($pm['verified']??0); ?>/<?php echo intval($pm['requested']??0); ?>)</small><?php endif; ?></p><?php endif; ?>
         </div>
 
         <h2>Private Plugin Impact Test</h2>
         <div class="wpi-box"><form class="wpi-form-row" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post"><input type="hidden" name="action" value="wpi_plugin_impact"><?php wp_nonce_field('wpi_plugin_impact'); ?>
         <label>Route<input type="url" name="profile_url" required value="<?php echo esc_attr(home_url('/')); ?>"></label><label>Plugin<select name="plugin" required><option value="">Select plugin</option><?php foreach($active_plugins as $p): if($p['file']===WPI_BASENAME)continue; ?><option value="<?php echo esc_attr($p['file']); ?>"><?php echo esc_html($p['name'].' '.$p['version']); ?></option><?php endforeach; ?></select></label><button class="button">Benchmark Plugin</button></form>
-        <p class="description">Runs warm-ups followed by five alternating A/B pairs. The plugin remains active for visitors and is excluded only from signed private requests.</p>
-        <?php if($impact): $bm=$impact['baseline_meta']??array(); $wm=$impact['without_meta']??array(); ?><p><strong><?php echo esc_html($impact['plugin']); ?>:</strong> <?php if($impact['baseline']&&$impact['without']&&!empty($impact['comparable'])): ?>baseline <?php echo esc_html($impact['baseline_median']); ?> ms; without plugin <?php echo esc_html($impact['without_median']); ?> ms; estimated impact <strong><?php echo esc_html(($impact['delta']>=0?'+':'').$impact['delta']); ?> ms</strong> · <?php echo esc_html( $impact['confidence'] ?? 'low' ); ?> confidence.<?php elseif(empty($impact['comparable'])): ?><span class="wpi-critical">The responses changed too much to compare safely. Check for missing templates, redirects or plugin dependencies.</span><?php else: ?><span class="wpi-critical">Benchmark could not be verified because one or more diagnostic paths were served before WordPress.</span><?php endif; ?> <small>(baseline <?php echo intval($bm['verified']??0); ?>/<?php echo intval($bm['requested']??0); ?>; exclusion <?php echo intval($wm['verified']??0); ?>/<?php echo intval($wm['requested']??0); ?> verified)</small></p><?php endif; ?>
+        <p class="description">Runs warm-ups followed by five alternating A/B pairs. Each result is matched to its saved server-side PHP measurement and verified exclusion. The plugin remains active for visitors.</p>
+        <?php if($impact): $bm=$impact['baseline_meta']??array(); $wm=$impact['without_meta']??array(); ?><p><strong><?php echo esc_html($impact['plugin']); ?>:</strong> <?php if($impact['baseline']&&$impact['without']&&!empty($impact['comparable'])&&count((array)($impact['pair_deltas']??array()))>=5): ?>baseline PHP <?php echo esc_html(round((float)$impact['baseline_median'],1)); ?> ms; without plugin <?php echo esc_html(round((float)$impact['without_median'],1)); ?> ms; <?php if(!empty($impact['repeatable'])): ?>paired impact <strong><?php echo esc_html(($impact['delta']>=0?'+':'').$impact['delta']); ?> ms</strong> · <?php echo esc_html($impact['confidence']); ?> confidence.<?php else: ?><strong>No repeatable plugin cost detected.</strong> The paired median <?php echo esc_html(($impact['delta']>=0?'+':'').$impact['delta']); ?> ms is within the ±<?php echo esc_html($impact['noise_floor']); ?> ms noise floor.<?php endif; ?><?php elseif(empty($impact['comparable'])): ?><span class="wpi-critical">The responses changed too much to compare safely. Check for missing templates, redirects or plugin dependencies.</span><?php else: ?><span class="wpi-critical">The benchmark did not produce five verified server-side pairs. Check the MU profiler and page-cache bypass, then run it again.</span><?php endif; ?> <small>(server verified: baseline <?php echo intval($bm['verified']??0); ?>/<?php echo intval($bm['requested']??0); ?>; exclusion <?php echo intval($wm['verified']??0); ?>/<?php echo intval($wm['requested']??0); ?>)</small></p><?php if(!empty($impact['pair_deltas'])): ?><p class="description">Pair deltas: <?php echo esc_html(implode(', ',array_map(static function($value){return ($value>=0?'+':'').round($value,1);},(array)$impact['pair_deltas']))); ?> ms. Variability (MAD): <?php echo esc_html($impact['mad']); ?> ms. Positive values mean the plugin added PHP time.</p><?php endif; ?><?php endif; ?>
         </div>
         </section>
         <?php endif; ?>
@@ -615,8 +615,8 @@ final class WPI_Admin {
 
         <?php if ( 'profiling' === $active_view ): ?>
         <section class="wpi-view" data-wpi-view="profiling">
-        <h2>Recent Request Samples</h2><table class="widefat striped"><thead><tr><th>ID</th><th>Time</th><th>Mode</th><th>Route</th><th>PHP</th><th>DB</th><th>Queries</th><th>HTTP</th><th>Memory</th><th>Phases / hooks</th></tr></thead><tbody>
-        <?php foreach($runs as $r): $payload=json_decode($r->payload,true); ?><tr><td><?php echo (int)$r->id; ?></td><td><?php echo esc_html($r->created_at); ?></td><td><?php echo esc_html($r->mode); ?></td><td><code><?php echo esc_html($r->route); ?></code></td><td><?php echo esc_html($r->php_ms.' ms'); ?></td><td><?php echo esc_html($r->db_ms.' ms'); ?></td><td><?php echo (int)$r->query_count; ?></td><td><?php echo esc_html($r->http_ms.' ms / '.(int)$r->http_count); ?></td><td><?php echo esc_html(size_format((int)$r->memory_peak)); ?></td><td><small><?php echo esc_html(self::top_timings($payload)); ?></small></td></tr><?php endforeach; ?>
+        <h2>Recent Request Samples</h2><table class="widefat striped"><thead><tr><th>ID</th><th>Time</th><th>Mode</th><th>Variant</th><th>Route</th><th>PHP</th><th>DB</th><th>Queries</th><th>HTTP</th><th>Memory</th><th>Phases / hooks</th></tr></thead><tbody>
+        <?php foreach($runs as $r): $payload=json_decode($r->payload,true); ?><tr><td><?php echo (int)$r->id; ?></td><td><?php echo esc_html($r->created_at); ?></td><td><?php echo esc_html($r->mode); ?></td><td><?php echo esc_html(!empty($r->excluded_plugin)?'without '.$r->excluded_plugin:'all plugins'); ?></td><td><code><?php echo esc_html($r->route); ?></code></td><td><?php echo esc_html($r->php_ms.' ms'); ?></td><td><?php echo esc_html($r->db_ms.' ms'); ?></td><td><?php echo (int)$r->query_count; ?></td><td><?php echo esc_html($r->http_ms.' ms / '.(int)$r->http_count); ?></td><td><?php echo esc_html(size_format((int)$r->memory_peak)); ?></td><td><small><?php echo esc_html(self::top_timings($payload)); ?></small></td></tr><?php endforeach; ?>
         </tbody></table>
 
         <h2>Captured Slow / Repeated Queries</h2><table class="widefat striped"><thead><tr><th>Run</th><th>Component</th><th>Calls</th><th>Total / max</th><th>Query</th><th>EXPLAIN analysis</th></tr></thead><tbody>

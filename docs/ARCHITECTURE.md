@@ -28,6 +28,8 @@ The small MU bootstrap loads early enough to:
 - enable detailed query collection/backtrace capture only when needed by profiling/sampling
 - capture early WordPress/plugin bootstrap phase timing
 
+Every plugin-impact request carries a signed probe UUID and the intended exclusion. The response echoes both, and the normal plugin persists both with the server-side PHP measurement. WPI accepts a sample only when the response and stored run match the request. Impact is the median of paired all-plugin minus excluded-plugin PHP timings; median absolute deviation establishes a per-test noise floor before WPI calls the result repeatable.
+
 No active-plugin state is changed for ordinary visitors and plugin activation/deactivation hooks are not run by a private exclusion probe.
 
 ## Database analysis

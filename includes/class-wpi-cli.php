@@ -209,8 +209,8 @@ final class WPI_CLI {
         $runs = max( 1, min( 10, (int) ( $assoc['runs'] ?? 3 ) ) );
         $times = $this->timed( $url, '', $runs );
         if ( ! $times ) { WP_CLI::error( 'No verified diagnostic runs reached WordPress. A page cache/reverse proxy may be serving the URL before the MU profiler.' ); }
-        $median = $this->median( $times );
-        WP_CLI::success( 'Runs: ' . implode( ', ', array_map( static function ( $v ) { return round( $v, 1 ); }, $times ) ) . ' ms; median ' . round( $median, 1 ) . ' ms. Deep SQL/HTTP/hook details are stored in Performance Inspector.' );
+        $median = WPI_Utils::median( $times );
+        WP_CLI::success( 'Server PHP runs: ' . implode( ', ', array_map( static function ( $v ) { return round( $v, 1 ); }, $times ) ) . ' ms; median ' . round( $median, 1 ) . ' ms. Deep SQL/HTTP/hook details are stored in Performance Inspector.' );
     }
 
     /** Estimate a plugin route impact using private signed exclusion requests. ## OPTIONS <url> <plugin-file> [--runs=<runs>] */
@@ -218,20 +218,29 @@ final class WPI_CLI {
         $url = $this->own_url( $args[0] );
         $plugin = sanitize_text_field( $args[1] );
         if ( $plugin === WPI_BASENAME ) { WP_CLI::error( 'Performance Inspector cannot exclude itself.' ); }
-        $runs = max( 3, min( 10, (int) ( $assoc['runs'] ?? 5 ) ) );
+        $runs = max( 5, min( 10, (int) ( $assoc['runs'] ?? 5 ) ) );
         $active = array_merge( (array) get_option( 'active_plugins', array() ), is_multisite() ? array_keys( (array) get_site_option( 'active_sitewide_plugins', array() ) ) : array() );
         if ( ! in_array( $plugin, $active, true ) ) { WP_CLI::error( 'Plugin must be active.' ); }
         $this->timed( $url, '', 1 ); $this->timed( $url, $plugin, 1 );
-        $base = array(); $without = array();
+        $base = array(); $without = array(); $deltas = array();
         for ( $pair = 0; $pair < $runs; $pair++ ) {
             $order = 0 === $pair % 2 ? array( '', $plugin ) : array( $plugin, '' );
-            foreach ( $order as $exclude ) { $value = $this->timed( $url, $exclude, 1 ); if ( '' === $exclude ) { $base = array_merge( $base, $value ); } else { $without = array_merge( $without, $value ); } }
+            $pair_values = array( 'baseline' => null, 'without' => null );
+            foreach ( $order as $exclude ) {
+                $value = $this->timed( $url, $exclude, 1 );
+                if ( '' === $exclude ) { $base = array_merge( $base, $value ); $pair_values['baseline'] = $value ? (float) $value[0] : null; }
+                else { $without = array_merge( $without, $value ); $pair_values['without'] = $value ? (float) $value[0] : null; }
+            }
+            if ( null !== $pair_values['baseline'] && null !== $pair_values['without'] ) { $deltas[] = round( $pair_values['baseline'] - $pair_values['without'], 3 ); }
         }
-        if ( ! $base || ! $without ) { WP_CLI::error( 'Benchmark could not be verified. A page cache/reverse proxy may be serving the diagnostic URL before WordPress.' ); }
-        $base_m = $this->median( $base ); $without_m = $this->median( $without ); $delta = round( $base_m - $without_m, 1 );
-        WP_CLI::log( 'Baseline median: ' . round( $base_m, 1 ) . ' ms' );
+        if ( count( $deltas ) < $runs ) { WP_CLI::error( 'Benchmark could not match every request to a verified server-side measurement. Check the MU profiler and page-cache bypass.' ); }
+        $base_m = WPI_Utils::median( $base ); $without_m = WPI_Utils::median( $without );
+        $analysis = WPI_Utils::analyze_paired_impact( $deltas, true );
+        WP_CLI::log( 'Baseline PHP median: ' . round( $base_m, 1 ) . ' ms' );
         WP_CLI::log( 'Without ' . $plugin . ': ' . round( $without_m, 1 ) . ' ms' );
-        WP_CLI::success( 'Estimated route impact: ' . ( $delta >= 0 ? '+' : '' ) . $delta . ' ms. Confirm with query/HTTP/hook evidence.' );
+        WP_CLI::log( 'Pair deltas: ' . implode( ', ', array_map( static function ( $value ) { return ( $value >= 0 ? '+' : '' ) . round( $value, 1 ); }, $deltas ) ) . ' ms' );
+        if ( $analysis['repeatable'] ) { WP_CLI::success( 'Paired route impact: ' . ( $analysis['delta'] >= 0 ? '+' : '' ) . $analysis['delta'] . ' ms; ' . $analysis['confidence'] . ' confidence.' ); }
+        else { WP_CLI::warning( 'No repeatable plugin cost detected. The paired median ' . ( $analysis['delta'] >= 0 ? '+' : '' ) . $analysis['delta'] . ' ms is within the ±' . $analysis['noise_floor'] . ' ms noise floor.' ); }
     }
 
     private function own_url( $url ) {
@@ -245,20 +254,20 @@ final class WPI_CLI {
     private function timed( $url, $exclude, $runs ) {
         $a = array();
         for ( $i = 0; $i < $runs; $i++ ) {
-            $tok = WPI_Bootstrap::token( $url, $exclude );
-            $u = add_query_arg( array_merge( $tok, array( 'wpi_probe' => wp_generate_uuid4() ) ), $url );
-            $s = microtime( true );
+            $probe_id = wp_generate_uuid4();
+            $tok = WPI_Bootstrap::token( $url, $exclude, $probe_id );
+            $u = add_query_arg( $tok, $url );
             $r = wp_remote_get( $u, array( 'timeout' => 30, 'redirection' => 0, 'sslverify' => apply_filters( 'https_local_ssl_verify', false ), 'headers' => array( 'Cache-Control' => 'no-cache', 'Pragma' => 'no-cache' ) ) );
-            if ( ! is_wp_error( $r ) && '1' === trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-diagnostic' ) ) ) {
+            $headers_match = ! is_wp_error( $r ) && '1' === trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-diagnostic' ) ) && hash_equals( $probe_id, trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-probe-id' ) ) ) && hash_equals( $exclude ?: 'none', trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-excluded-plugin' ) ) );
+            if ( $headers_match ) {
                 $status = (int) wp_remote_retrieve_response_code( $r );
                 $body = (string) wp_remote_retrieve_body( $r );
-                if ( $status >= 200 && $status < 300 && strlen( $body ) >= 128 ) { $a[] = ( microtime( true ) - $s ) * 1000; }
+                $run = WPI_Utils::probe_run( $probe_id, $exclude );
+                if ( $status >= 200 && $status < 300 && strlen( $body ) >= 128 && $run ) { $a[] = round( (float) $run['php_ms'], 1 ); }
             }
         }
-        sort( $a ); return $a;
+        return $a;
     }
-
-    private function median( array $a ) { if ( ! $a ) { return 0; } sort( $a, SORT_NUMERIC ); $n=count($a); $m=(int)floor($n/2); return $n%2?$a[$m]:(($a[$m-1]+$a[$m])/2); }
 
     /** List active plugins and loading/callback signals. */
     public function plugins() { WP_CLI\Utils\format_items( 'table', WPI_Scanner::plugins(), array( 'active','name','version','included_php_files_current_request','registered_callbacks_current_request','registered_hooks_current_request','file' ) ); }

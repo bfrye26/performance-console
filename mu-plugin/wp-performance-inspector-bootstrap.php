@@ -1,12 +1,13 @@
 <?php
 /** WP Performance Inspector early diagnostic/bootstrap sampler.
- * WPI Bootstrap Version: 1.1.0
+ * WPI Bootstrap Version: 1.2.0
  */
 if ( ! defined( 'ABSPATH' ) ) { return; }
 
 $wpi_basename = '{{PLUGIN_BASENAME}}';
 $wpi_deep = false;
 $wpi_exclude = '';
+$wpi_probe_id = '';
 $wpi_diag = isset( $_GET['wpi_diag'], $_GET['wpi_ts'], $_GET['wpi_sig'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 if ( $wpi_diag ) {
@@ -14,8 +15,9 @@ if ( $wpi_diag ) {
     $wpi_ts = absint( $_GET['wpi_ts'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
     $wpi_sig = sanitize_text_field( wp_unslash( $_GET['wpi_sig'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
     $wpi_exclude = isset( $_GET['wpi_exclude'] ) ? sanitize_text_field( wp_unslash( $_GET['wpi_exclude'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+    $wpi_probe_id = isset( $_GET['wpi_probe'] ) ? sanitize_text_field( wp_unslash( $_GET['wpi_probe'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
     $wpi_path = isset( $_SERVER['REQUEST_URI'] ) ? strtok( wp_unslash( $_SERVER['REQUEST_URI'] ), '?' ) : '/';
-    $wpi_expected = hash_hmac( 'sha256', $wpi_ts . '|' . $wpi_path . '|' . $wpi_exclude, (string) $wpi_secret );
+    $wpi_expected = hash_hmac( 'sha256', $wpi_ts . '|' . $wpi_path . '|' . $wpi_exclude . '|' . $wpi_probe_id, (string) $wpi_secret );
     $wpi_deep = $wpi_secret && abs( time() - $wpi_ts ) <= 120 && hash_equals( $wpi_expected, $wpi_sig );
 }
 
@@ -33,15 +35,19 @@ if ( $wpi_sample && ! defined( 'WPI_SAMPLED_REQUEST' ) ) { define( 'WPI_SAMPLED_
 if ( ! defined( 'SAVEQUERIES' ) ) { define( 'SAVEQUERIES', true ); } elseif ( ! SAVEQUERIES && ! defined( 'WPI_QUERY_TIMING_BLOCKED' ) ) { define( 'WPI_QUERY_TIMING_BLOCKED', true ); }
 if ( ! defined( 'DONOTCACHEPAGE' ) && $wpi_deep ) { define( 'DONOTCACHEPAGE', true ); }
 if ( $wpi_deep ) {
-    add_action( 'send_headers', static function () {
+    add_action( 'send_headers', static function () use ( $wpi_probe_id, $wpi_exclude ) {
         if ( ! headers_sent() ) {
             header( 'X-WPI-Diagnostic: 1' );
+            header( 'X-WPI-Probe-ID: ' . $wpi_probe_id );
+            header( 'X-WPI-Excluded-Plugin: ' . ( $wpi_exclude ?: 'none' ) );
             header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
         }
     }, PHP_INT_MAX );
 }
 
 $GLOBALS['wpi_diag_start'] = microtime( true );
+$GLOBALS['wpi_probe_id'] = $wpi_probe_id;
+$GLOBALS['wpi_excluded_plugin'] = $wpi_exclude;
 $GLOBALS['wpi_phase_marks'] = array( 'mu_plugin_bootstrap' => $GLOBALS['wpi_diag_start'] );
 
 $wpi_mark = static function ( $name ) { $GLOBALS['wpi_phase_marks'][ $name ] = microtime( true ); };

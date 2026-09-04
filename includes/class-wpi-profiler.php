@@ -139,11 +139,14 @@ final class WPI_Profiler {
         $run_payload['database_errors'] = self::database_errors( (array) $EZSQL_ERROR, $trace_map );
         $run_payload['included_files'] = count( get_included_files() );
         $run_payload['query_timing_available'] = defined( 'SAVEQUERIES' ) && SAVEQUERIES;
+        $run_payload['probe_id'] = sanitize_text_field( (string) ( $GLOBALS['wpi_probe_id'] ?? '' ) );
+        $run_payload['excluded_plugin'] = sanitize_text_field( (string) ( $GLOBALS['wpi_excluded_plugin'] ?? '' ) );
 
         $wpdb->insert( WPI_Utils::table( 'runs' ), array(
             'created_at' => WPI_Utils::now_mysql(), 'route' => $route, 'mode' => $deep ? 'deep' : 'sample',
             'php_ms' => round( $php_ms, 3 ), 'db_ms' => round( $db_ms, 3 ), 'query_count' => $query_count,
             'http_ms' => round( $http_ms, 3 ), 'http_count' => count( self::$http ), 'memory_peak' => memory_get_peak_usage( true ),
+            'probe_id' => $run_payload['probe_id'], 'excluded_plugin' => $run_payload['excluded_plugin'],
             'payload' => wp_json_encode( $run_payload ),
         ) );
         $run_id = (int) $wpdb->insert_id;

@@ -1,4 +1,12 @@
-# WP Performance Inspector 2.0.0
+# WP Performance Inspector 2.0.1
+
+## 2.0.1 correlated plugin profiling
+
+- Measures plugin impact from the PHP time saved by WordPress for each exact signed probe, rather than from total loopback-request duration.
+- Signs and verifies the probe ID and excluded plugin, then matches both to the persisted diagnostic run before accepting a sample.
+- Calculates the result from five paired A/B differences and exposes the individual deltas, median absolute deviation, noise floor and repeatability verdict.
+- Shows whether each recent request used all plugins or a private plugin exclusion, making the experiment auditable.
+- Treats unstable or small differences as “No repeatable plugin cost detected” instead of assigning ordinary request jitter to the selected plugin.
 
 ## 2.0.0 incident workflow and trustworthy experiments
 
@@ -199,7 +207,7 @@ wp performance innodb-preflight wp_postmeta
 wp performance innodb-rebuild-index wp_example lookup_key --backup-confirmed
 wp performance database-fix rebuild_innodb_table --table=wp_example --backup-confirmed --force-large
 wp performance profile https://example.com/article/ --runs=3
-wp performance plugin-impact https://example.com/article/ plugin/plugin.php --runs=3
+wp performance plugin-impact https://example.com/article/ plugin/plugin.php --runs=5
 wp performance issues --severity=critical
 ```
 

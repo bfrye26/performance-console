@@ -236,6 +236,52 @@ final class WPI_Utils {
         return $origin( $url ) === $origin( home_url() );
     }
 
+    public static function median( array $values ) {
+        $values = array_values( array_filter( array_map( 'floatval', $values ), 'is_finite' ) );
+        if ( ! $values ) { return 0.0; }
+        sort( $values, SORT_NUMERIC );
+        $count = count( $values );
+        $middle = (int) floor( $count / 2 );
+        return $count % 2 ? (float) $values[ $middle ] : ( (float) $values[ $middle - 1 ] + (float) $values[ $middle ] ) / 2;
+    }
+
+    public static function probe_run( $probe_id, $expected_exclude = '' ) {
+        global $wpdb;
+        $probe_id = sanitize_text_field( (string) $probe_id );
+        if ( ! preg_match( '/^[a-f0-9-]{36}$/i', $probe_id ) ) { return false; }
+        $row = $wpdb->get_row( $wpdb->prepare( 'SELECT php_ms,db_ms,query_count,http_ms,http_count,memory_peak,probe_id,excluded_plugin FROM ' . self::table( 'runs' ) . ' WHERE probe_id=%s ORDER BY id DESC LIMIT 1', $probe_id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        if ( ! $row || (string) $expected_exclude !== (string) ( $row['excluded_plugin'] ?? '' ) ) { return false; }
+        foreach ( array( 'php_ms', 'db_ms', 'http_ms' ) as $field ) { $row[ $field ] = (float) $row[ $field ]; }
+        foreach ( array( 'query_count', 'http_count', 'memory_peak' ) as $field ) { $row[ $field ] = (int) $row[ $field ]; }
+        return $row;
+    }
+
+    public static function analyze_paired_impact( array $deltas, $comparable = true ) {
+        $deltas = array_values( array_filter( array_map( 'floatval', $deltas ), 'is_finite' ) );
+        $delta = round( self::median( $deltas ), 1 );
+        $deviations = array_map( static function ( $value ) use ( $delta ) { return abs( $value - $delta ); }, $deltas );
+        $mad = round( self::median( $deviations ), 1 );
+        $noise_floor = round( max( 5.0, 2.5 * $mad ), 1 );
+        $sign_agreement = 0;
+        foreach ( $deltas as $value ) {
+            if ( ( $delta >= 0 && $value > 0 ) || ( $delta < 0 && $value < 0 ) ) { $sign_agreement++; }
+        }
+        $repeatable = (bool) $comparable && count( $deltas ) >= 5 && abs( $delta ) > $noise_floor && $sign_agreement >= 4;
+        $confidence = 'low';
+        if ( $repeatable ) {
+            $confidence = $sign_agreement === count( $deltas ) && $mad <= max( 2.5, abs( $delta ) * 0.25 ) ? 'high' : 'medium';
+        }
+        return array(
+            'delta' => $delta,
+            'mad' => $mad,
+            'noise_floor' => $noise_floor,
+            'sign_agreement' => $sign_agreement,
+            'repeatable' => $repeatable,
+            'confidence' => $confidence,
+            'pairs' => count( $deltas ),
+        );
+    }
+
 
     /** Low-cardinality identity for passive production sampling. */
     public static function route_group() {

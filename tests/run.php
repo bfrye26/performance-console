@@ -52,6 +52,24 @@ test_case( 'same-origin checks include scheme and port', static function (): voi
     assert_same( false, WPI_Utils::same_origin_url( 'https://example.test:8080/review/example/' ) );
 } );
 
+test_case( 'median handles even and odd sample counts', static function (): void {
+    assert_same( 3.0, WPI_Utils::median( array( 9, 1, 3 ) ) );
+    assert_same( 2.5, WPI_Utils::median( array( 4, 1, 3, 2 ) ) );
+} );
+
+test_case( 'paired impact rejects timing noise', static function (): void {
+    $analysis = WPI_Utils::analyze_paired_impact( array( 72, -70, 60, -65, 3 ), true );
+    assert_same( false, $analysis['repeatable'] );
+    assert_same( 'low', $analysis['confidence'] );
+} );
+
+test_case( 'paired impact recognizes a stable plugin cost', static function (): void {
+    $analysis = WPI_Utils::analyze_paired_impact( array( 11, 10, 12, 9, 11 ), true );
+    assert_same( 11.0, $analysis['delta'] );
+    assert_same( true, $analysis['repeatable'] );
+    assert_same( 'high', $analysis['confidence'] );
+} );
+
 test_case( 'backup primary-key discovery uses portable SHOW INDEX syntax', static function (): void {
     $source = file_get_contents( dirname( __DIR__ ) . '/includes/class-wpi-database-backup.php' );
     assert_same( false, false !== strpos( $source, "WHERE Key_name='PRIMARY' ORDER BY" ) );
