@@ -38,12 +38,15 @@
     if (searchFilter) { searchFilter.addEventListener('input', function () { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(filterIncidents, 120); }); }
 
     Array.prototype.forEach.call(root.querySelectorAll('form[method="post"]'), function (form) {
-        form.addEventListener('submit', function () {
-            var button = form.querySelector('button[type="submit"], button:not([type])');
+        form.addEventListener('submit', function (event) {
+            var button = event.submitter || form.querySelector('button[type="submit"], button:not([type])');
             if (!button || button.disabled) { return; }
-            button.classList.add('is-busy');
-            button.setAttribute('aria-busy', 'true');
-            button.disabled = true;
+            form.setAttribute('aria-busy', 'true');
+            window.setTimeout(function () {
+                button.classList.add('is-busy');
+                button.setAttribute('aria-busy', 'true');
+                button.disabled = true;
+            }, 0);
         });
     });
 }());
