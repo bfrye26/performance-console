@@ -594,21 +594,56 @@ final class WPI_Admin {
         <div class="wpi-view-heading"><h2>Request profiling</h2><p>Capture a real WordPress save or measure public routes, then isolate plugin, database, hook and outbound HTTP cost.</p></div>
         <h2 id="save-profiling">Slow Save Profiler</h2>
         <?php if ( $save_capture_notice ): ?><div class="notice <?php echo ! empty( $save_capture_notice['ok'] ) ? 'notice-success' : 'notice-error'; ?> inline" role="status"><p><?php echo esc_html( $save_capture_notice['message'] ?? '' ); ?></p></div><?php endif; ?>
-        <div class="wpi-box wpi-save-capture">
-            <div class="wpi-save-capture__intro">
-                <div><h3>Capture one real save</h3><p>Arm the profiler, save content in this browser, then return here. WPI records timings and safe identifiers only; it does not store titles, content, field values, or request bodies.</p></div>
-                <?php if ( $save_capture_status ): ?>
-                    <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post"><input type="hidden" name="action" value="wpi_save_capture"><input type="hidden" name="capture_action" value="cancel"><?php wp_nonce_field( 'wpi_save_capture' ); ?><button class="button">Cancel capture</button></form>
-                <?php else: ?>
-                    <form class="wpi-form-row" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post"><input type="hidden" name="action" value="wpi_save_capture"><input type="hidden" name="capture_action" value="arm"><?php wp_nonce_field( 'wpi_save_capture' ); ?><label>Capture type<select name="capture_kind"><option value="manual">Next manual save</option><option value="autosave">Next autosave</option></select></label><button class="button button-primary">Arm save capture</button></form>
-                <?php endif; ?>
+        <div class="wpi-box wpi-save-capture<?php echo $save_capture_status ? ' is-armed' : ''; ?>">
+            <header class="wpi-save-capture__header">
+                <div class="wpi-save-capture__title">
+                    <h3>Profile your next save</h3>
+                    <span class="wpi-status <?php echo $save_capture_status ? 'wpi-status--armed' : 'wpi-status--good'; ?>"><?php echo $save_capture_status ? 'Capture armed' : 'Ready'; ?></span>
+                </div>
+                <p>Measure one real WordPress save in this browser and see where PHP, database, hooks, plugins, and outbound requests spend their time.</p>
+            </header>
+
+            <div class="wpi-save-capture__layout">
+                <div class="wpi-save-capture__control">
+                    <?php if ( $save_capture_status ): ?>
+                        <div class="wpi-capture-listening" role="status">
+                            <span class="dashicons dashicons-controls-play" aria-hidden="true"></span>
+                            <div><h4>Listening for the next <?php echo esc_html( $save_capture_status['kind'] ); ?> save</h4><p>Keep this browser open, edit an existing post, page, product, or custom post type, and save it once.<?php if ( 'manual' === $save_capture_status['kind'] ): ?> Autosaves and unrelated WordPress updates will not consume this capture.<?php endif; ?></p></div>
+                        </div>
+                        <div class="wpi-save-capture__armed-actions">
+                            <p><strong>Capture expires:</strong> <?php echo esc_html( wp_date( 'M j, Y g:i:s a T', (int) $save_capture_status['expires'] ) ); ?></p>
+                            <form action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post"><input type="hidden" name="action" value="wpi_save_capture"><input type="hidden" name="capture_action" value="cancel"><?php wp_nonce_field( 'wpi_save_capture' ); ?><button class="button">Cancel capture</button></form>
+                        </div>
+                    <?php else: ?>
+                        <form class="wpi-save-capture__form" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" method="post">
+                            <input type="hidden" name="action" value="wpi_save_capture"><input type="hidden" name="capture_action" value="arm"><?php wp_nonce_field( 'wpi_save_capture' ); ?>
+                            <fieldset>
+                                <legend>What should WPI capture?</legend>
+                                <div class="wpi-capture-choices">
+                                    <label class="wpi-capture-choice"><input type="radio" name="capture_kind" value="manual" checked required><span><strong>Manual save</strong><small>Your next Update, Publish, or Save draft action.</small></span></label>
+                                    <label class="wpi-capture-choice"><input type="radio" name="capture_kind" value="autosave"><span><strong>Autosave</strong><small>The editor’s next automatic background save.</small></span></label>
+                                </div>
+                            </fieldset>
+                            <div class="wpi-save-capture__submit"><button class="button button-primary"><span class="dashicons dashicons-controls-play" aria-hidden="true"></span>Arm save capture</button><small>Armed for 10 minutes and disarmed after one matching request.</small></div>
+                        </form>
+                    <?php endif; ?>
+                </div>
+
+                <aside class="wpi-save-capture__journey" aria-label="Save capture steps">
+                    <h4><?php echo $save_capture_status ? 'Finish this capture' : 'What happens next'; ?></h4>
+                    <ol>
+                        <li><span class="wpi-save-capture__step-number" aria-hidden="true">1</span><div><strong><?php echo $save_capture_status ? 'Capture is armed' : 'Arm the profiler'; ?></strong><span><?php echo $save_capture_status ? 'WPI is waiting in this browser.' : 'Choose the save type and start a one-request capture.'; ?></span></div></li>
+                        <li><span class="wpi-save-capture__step-number" aria-hidden="true">2</span><div><strong>Save content once</strong><span>Use an existing post, page, product, or custom post type.</span></div></li>
+                        <li><span class="wpi-save-capture__step-number" aria-hidden="true">3</span><div><strong>Review the result</strong><span>Return here to see timing and likely plugin or hook causes.</span></div></li>
+                    </ol>
+                </aside>
             </div>
-            <?php if ( $save_capture_status ): ?>
-                <div class="wpi-section-note"><span class="dashicons dashicons-controls-play" aria-hidden="true"></span><div><strong>Waiting for the next <?php echo esc_html( $save_capture_status['kind'] ); ?> save.</strong><br>Expires <?php echo esc_html( wp_date( 'M j, Y g:i:s a T', (int) $save_capture_status['expires'] ) ); ?>. Manual capture ignores autosaves, media uploads, settings changes, comments, and user updates.</div></div>
-            <?php else: ?>
-                <ol class="wpi-save-steps"><li>Choose manual save or autosave and arm the capture.</li><li>Open an existing post, page, product, or custom post type in the same browser and save it once.</li><li>Return to this report. The capture disarms itself after the matching request.</li></ol>
-            <?php endif; ?>
-            <p class="description">Diagnostic tracing adds some overhead, so use the result to rank causes—not as a clean end-user latency benchmark. WPI never replays a write or disables a plugin during saving.</p>
+
+            <footer class="wpi-save-capture__assurance">
+                <span class="dashicons dashicons-shield-alt" aria-hidden="true"></span>
+                <div><strong>Content-safe diagnostics</strong><span>WPI stores timings and safe identifiers—not titles, field values, content, or request bodies.</span></div>
+                <p>Tracing adds some overhead, so use results to rank causes. WPI never replays a write or disables a plugin while saving.</p>
+            </footer>
         </div>
 
         <?php if ( $latest_save ): $latest_payload = json_decode( (string) $latest_save->payload, true ); $save_context = (array) ( $latest_payload['save_context'] ?? array() ); $save_components = (array) ( $latest_payload['save_components'] ?? array() ); $save_hooks = (array) ( $latest_payload['save_hook_components'] ?? array() ); $save_severity = (float) $latest_save->php_ms >= 1500 ? 'critical' : ( (float) $latest_save->php_ms >= 750 ? 'high' : ( (float) $latest_save->php_ms >= 500 ? 'warning' : 'good' ) ); ?>

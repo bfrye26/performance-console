@@ -1,4 +1,10 @@
-# WP Performance Inspector 2.1.0
+# WP Performance Inspector 2.1.1
+
+## 2.1.1 capture workflow polish
+
+- Rebuilds the Slow Save Profiler setup as a focused, responsive control surface with clear manual-save and autosave choices.
+- Adds distinct ready and armed states, concise next-step guidance, and stronger content-safety messaging.
+- Improves keyboard focus, semantic form controls, assistive-technology output, and supporting-text contrast.
 
 ## 2.1.0 slow-save diagnostics
 
