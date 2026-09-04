@@ -1,0 +1,142 @@
+=== WP Performance Inspector ===
+Contributors: cgm
+Tags: performance, database, query, profiler, diagnostics, slow queries
+Requires at least: 6.4
+Tested up to: 7.1
+Requires PHP: 7.4
+Stable tag: 2.0.0
+License: GPLv2 or later
+
+Production-oriented WordPress diagnostics and remediation with database integrity/schema checks, slow-query attribution, plugin fault analysis, cron/cache/server inspection, RUM and production safety gates.
+
+== Description ==
+
+WP Performance Inspector identifies database, plugin, query, job, cache, PHP/server and frontend bottlenecks and gives evidence-backed recommendations.
+
+Database diagnostics include current-core schema comparison, missing columns/indexes, integrity checks, orphaned data, autoload pressure, transient buildup, fragmentation, engine/collation problems, lock/connection pressure, InnoDB signals and slow-query/server counters.
+
+The Database Repair Centre can apply bounded fixes where practical, including expired transient cleanup, reversible autoload changes, rollback-backed orphan cleanup and reviewed core schema repairs. It now includes private resumable database backups and a guided maintenance-window path for large repairs, with WP-CLI retained as the preferred option for the largest tables.
+
+Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 detection, component/file/line attribution, safe EXPLAIN metadata, outbound HTTP timing and hook/phase timing. Private plugin-impact probes can exclude one plugin only for a signed diagnostic request without deactivating it for site visitors.
+
+== Installation ==
+
+1. Upload and activate the plugin.
+2. Open Performance in wp-admin.
+3. Run a production-safe scan.
+4. Install/verify the MU bootstrap for signed deep diagnostics.
+5. Review Database Repair Centre actions before applying them.
+6. Create and verify a WPI database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
+
+== Changelog ==
+
+= 2.0.0 =
+* Added grouped incident lifecycle, recurrence evidence, verification, snooze, resolution and accepted-risk controls.
+* Fixed stale route findings, idle database-daemon false positives and expected database capability-probe noise.
+* Added route-aware p75 RUM with client sampling, single-use tokens and ingestion rate limiting.
+* Added warm-up, alternating five-pair plugin experiments with response comparability and confidence checks.
+* Split the dashboard into lightweight server-rendered views and conditionally loaded diagnostic modules.
+* Added representative route suites, configurable deep-scan routes, responsive incident cards and regression tests.
+* Fixed MariaDB-compatible primary-key discovery during resumable database backups.
+
+= 1.10.1 =
+* Reworks plugin-owned exact duplicate-index repairs into a clear KEEP/REMOVE decision in the Database Repair Centre.
+* Shows the owning plugin, canonical-name state, risk, confidence, expected functional impact and storage/write impact.
+* Explicitly advises against creating a canonical replacement index when an equivalent verified legacy index is already being retained.
+* Renames the action to Remove Duplicate Index while preserving backup, large-table, ownership and live-signature safety checks.
+
+= 1.10.0 =
+* Adds plugin-managed database index ownership through the `wpi_managed_database_indexes` registry.
+* Integrates with CGM Authors 5.2.4 so WPI recognizes `cgm_authors_lookup` as canonical and the historical `cgm_idx_*` names as managed legacy aliases.
+* Duplicate-index repairs now keep the canonical name when present, otherwise the owning plugin's highest-priority legacy alias, rather than selecting by result order.
+* Revalidates managed-index ownership and keep/drop direction immediately before DDL.
+* Database Repair Centre now shows the owning plugin and canonical-name state for registered equivalent indexes.
+
+= 1.9.2 =
+* Fixed core-column repair when the selected column is part of a malformed live PRIMARY KEY even though WordPress does not expect that column in the key. This specifically prevents the MySQL/MariaDB error "All parts of a PRIMARY KEY must be NOT NULL" when correcting nullable core columns such as wp_usermeta.meta_key.
+* Added live-vs-expected PRIMARY KEY dependency planning. WPI can atomically drop the malformed live key, correct the selected column, and restore the exact WordPress PRIMARY KEY in one ALTER.
+* Preview SQL now comes from the same dependency planner used at execution time, so dependency repairs are visible before confirmation.
+* Retained NULL, duplicate-key and signed-to-unsigned preflights for all coordinated PRIMARY KEY work.
+
+= 1.9.0 =
+* New indigo/cyan Performance Inspector colour system distinct from CGM Tag Manager.
+* Removed external Google Fonts admin request.
+* Fixed tab-row vertical overflow/scrollbar.
+* Exact full-dataset finding counts with 200-row display limit called out separately.
+* Expanded Overview priority queue and scan snapshot.
+* Database repair results redirect back to the relevant remediation view.
+* Dependency-aware missing core PRIMARY KEY repair with NULL/duplicate/negative-value preflights.
+
+= 1.8.0 =
+* Rebuilt the wp-admin experience to match the current CGM Suite design language used by CGM Tag Manager.
+* Added suite-style header, typography, pine/ember colour system, patterned background, cards, buttons, forms, tables, notices and status badges.
+* Added Overview, Findings, Database, Profiling, Monitoring and System navigation without removing existing diagnostic or repair functionality.
+* Added hash-aware navigation so backup, repair and InnoDB transaction links open the correct interface view.
+* Added responsive layouts and improved mobile handling for large diagnostic tables.
+
+
+= 1.7.0 =
+* Added an InnoDB Transaction Manager directly in wp-admin for DDL-blocking, stuck and idle transactions.
+* Shows MySQL thread/transaction IDs, age/state, connection user/host/database, rows locked/modified, normalized SQL and blocker/waiter relationships.
+* Adds risk-classified guarded `KILL CONNECTION` handling with explicit rollback acknowledgement and an additional high-risk rollback acknowledgement for very old/large transactions.
+* WPI refuses to terminate its own connection, database/server system sessions, replication/daemon sessions or transactions already rolling back.
+* DDL safety errors now link directly to the Transaction Manager and include live transaction context.
+* Added `wp performance innodb-transactions` and `wp performance innodb-terminate`.
+* Long-running transaction findings now point to the in-plugin remediation workflow instead of only telling administrators to resolve the transaction externally.
+
+= 1.6.1 =
+* Rebuilt browser database backups around adaptive high-throughput batches instead of 100 rows per REST request.
+* Each backup step now processes multiple SELECT/INSERT chunks for up to a bounded time/byte budget before yielding.
+* Added table-width-aware initial batch sizing and runtime adaptive batch sizing from actual exported SQL bytes.
+* Added composite-primary-key cursor pagination to avoid OFFSET degradation on tables such as term relationships and plugin queues.
+* Increased multi-row INSERT statement sizes while retaining bounded packet/memory behavior.
+* Added live backup throughput, adaptive batch, current-table progress and improved estimated overall progress.
+* Reduced artificial delay between browser backup steps.
+
+= 1.6.0 =
+* Added a Database Backups area with private logical schema/data exports.
+* Browser backups are resumable and process rows in bounded batches; numeric primary keys use cursor pagination to avoid large OFFSET scans.
+* Added backup completion markers, SHA-256 verification, authenticated downloads and private/randomized storage with deny rules.
+* Recent verified WPI backups can satisfy Repair Centre backup requirements directly. External verified snapshots/backups remain supported.
+* Added guided wp-admin maintenance execution for previously CLI-only large repairs, retaining backup, lock, disk, DDL and explicit-risk gates.
+* WP-CLI remains available as the recommended path for the largest database operations.
+* Added `wp performance database-backup` and `wp performance database-backups`.
+* Fixed CLI repair acknowledgement forwarding for `--danger-confirmed` and `--data-loss-confirmed`.
+* Backup exports skip generated columns and preserve very large BIGINT cursors without PHP integer truncation.
+
+= 1.5.1 =
+* Fixed false WordPress core schema drift caused by truncating column definitions at datatype parentheses.
+* Added balanced CREATE TABLE parsing so all core columns/indexes are inspected correctly.
+* Clears stale schema-drift findings/cached scans on upgrade so a fresh scan is required before schema repair.
+* Improved schema/index recommendations to point directly to available Repair Centre actions.
+* Added explicit guided recovery steps for unsupported/custom storage engines instead of a dead-end manual-review state.
+* Added guided InnoDB recovery preflights with integrity, index, foreign-key, lock/transaction, online-DDL and disk-space evidence.
+* Added parsed InnoDB deadlock participants and active blocker/waiter graphs.
+* Added InnoDB buffer-pool, redo-capacity, purge-pressure and innodb_force_recovery guidance.
+* Added verified-backup acknowledgement requirements for schema/repair/optimize and InnoDB rebuild mutations.
+* Added guarded secondary BTREE index rebuilds using explicit ALGORITHM=INPLACE, LOCK=NONE with no COPY fallback.
+* Added advanced InnoDB table rebuild support through guarded WP-CLI maintenance workflows.
+* Added post-repair CHECK TABLE, ANALYZE TABLE and rebuilt-index verification.
+* Added conservative review-only missing-index candidates for simple slow single-table queries.
+* Added live SHOW ENGINES discovery and engine-specific maintenance capability rules for InnoDB, MyISAM, MariaDB Aria, ARCHIVE, CSV, MEMORY, NDB and unknown/plugin engines.
+* Automatic CSV repair remains blocked because of data-loss risk.
+
+
+
+= 1.2.0 =
+* Added current-WordPress core table/column/index schema verification.
+* Added Database Repair Centre with size-gated core schema repairs.
+* Added bounded expired transient and orphan cleanup with rollback snapshots where supported.
+* Added reversible autoload remediation based on sampled option-use evidence.
+* Added broader integrity checks across WordPress/plugin/custom tables.
+* Added InnoDB deadlock, lock, history-list, connection, temporary-table and scan/full-join diagnostics.
+* Added auto-increment exhaustion, fragmentation, collation/engine and duplicate-index diagnostics.
+* Hardened plugin-impact probes so HTTP failures/cached responses cannot be reported as valid speedups.
+* Expanded plugin/runtime, frontend, cron, Action Scheduler and regression diagnostics.
+
+= 1.1.0 =
+* Expanded plugin, frontend, database and production telemetry diagnostics.
+* Added signed query backtrace capture and lower-cardinality passive monitoring.
+
+= 1.0.0 =
+* Initial diagnostic framework.

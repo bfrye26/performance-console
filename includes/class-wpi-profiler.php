@@ -1,0 +1,448 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+final class WPI_Profiler {
+    private static $start = 0.0;
+    private static $http = array();
+    private static $http_starts = array();
+    private static $sample = false;
+    private static $hook_starts = array();
+    private static $hook_totals = array();
+    private static $option_hits = array();
+
+    public static function init() {
+        global $wpdb;
+        self::$start = isset( $GLOBALS['wpi_diag_start'] ) ? (float) $GLOBALS['wpi_diag_start'] : microtime( true );
+        $deep = defined( 'WPI_DEEP_DIAGNOSTIC' ) && WPI_DEEP_DIAGNOSTIC;
+        $early_sample = defined( 'WPI_SAMPLED_REQUEST' ) && WPI_SAMPLED_REQUEST;
+        self::$sample = $deep || $early_sample;
+
+        // Fallback if the MU bootstrap is not installed yet. This misses early plugin-load SQL but still provides useful request data.
+        if ( ! self::$sample ) {
+            $runtime = get_option( 'wpi_runtime', array( 'sample_rate' => 0.0002 ) );
+            $rate = max( 0, min( 1, (float) ( $runtime['sample_rate'] ?? 0.0002 ) ) );
+            self::$sample = $rate > 0 && mt_rand() / mt_getrandmax() <= $rate;
+            if ( self::$sample && ! defined( 'SAVEQUERIES' ) ) { define( 'SAVEQUERIES', true ); }
+        }
+        if ( ! self::$sample ) { return; }
+
+        // SAVEQUERIES is checked on each query by wpdb. Signed/sample requests only.
+        if ( ! defined( 'SAVEQUERIES' ) ) { define( 'SAVEQUERIES', true ); }
+
+        add_filter( 'http_request_args', array( __CLASS__, 'http_start' ), 10, 2 );
+        add_action( 'http_api_debug', array( __CLASS__, 'http_debug' ), 10, 5 );
+        add_action( 'shutdown', array( __CLASS__, 'shutdown' ), PHP_INT_MAX );
+        add_filter( 'site_status_tests', array( __CLASS__, 'site_health' ) );
+        add_filter( 'pre_option', array( __CLASS__, 'track_option' ), 9999, 3 );
+        self::register_hook_timers();
+    }
+
+
+    public static function track_option( $pre_option, $option, $default_value ) {
+        $option = sanitize_key( (string) $option );
+        if ( $option && count( self::$option_hits ) < 750 ) { self::$option_hits[ $option ] = ( self::$option_hits[ $option ] ?? 0 ) + 1; }
+        return $pre_option;
+    }
+
+    private static function register_hook_timers() {
+        foreach ( array( 'init','wp_loaded','parse_request','send_headers','parse_query','pre_get_posts','wp','template_redirect','wp_head','wp_footer' ) as $hook ) {
+            add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
+            add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
+        }
+    }
+
+    public static function hook_start() {
+        $hook = current_filter();
+        if ( ! isset( self::$hook_starts[ $hook ] ) ) { self::$hook_starts[ $hook ] = array(); }
+        self::$hook_starts[ $hook ][] = microtime( true );
+    }
+
+    public static function hook_stop() {
+        $hook = current_filter();
+        if ( empty( self::$hook_starts[ $hook ] ) ) { return; }
+        $start = array_pop( self::$hook_starts[ $hook ] );
+        self::$hook_totals[ $hook ] = ( self::$hook_totals[ $hook ] ?? 0 ) + ( microtime( true ) - $start ) * 1000;
+    }
+
+    public static function http_start( $args, $url ) {
+        $key = md5( $url . '|' . microtime( true ) . '|' . mt_rand() );
+        self::$http_starts[ $url ][] = array(
+            'key' => $key, 'start' => microtime( true ),
+            'method' => sanitize_text_field( $args['method'] ?? 'GET' ),
+            'timeout' => (float) ( $args['timeout'] ?? 5 ),
+            'blocking' => ! isset( $args['blocking'] ) || (bool) $args['blocking'],
+            'hook' => current_filter(),
+        );
+        return $args;
+    }
+
+    public static function http_debug( $response, $context, $class, $parsed_args, $url ) {
+        if ( 'response' !== $context ) { return; }
+        $trace = debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 16 );
+        $component = WPI_Utils::component_from_trace( $trace );
+        $started = array();
+        if ( ! empty( self::$http_starts[ $url ] ) ) { $started = array_shift( self::$http_starts[ $url ] ); }
+        $elapsed = ! empty( $started['start'] ) ? ( microtime( true ) - $started['start'] ) * 1000 : 0;
+        $error = is_wp_error( $response ) ? sanitize_text_field( $response->get_error_message() ) : '';
+        $status = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+        self::$http[] = array(
+            'host' => sanitize_text_field( wp_parse_url( $url, PHP_URL_HOST ) ),
+            'path' => sanitize_text_field( wp_parse_url( $url, PHP_URL_PATH ) ?: '/' ),
+            'ms' => round( $elapsed, 3 ),
+            'component' => $component,
+            'method' => sanitize_text_field( $started['method'] ?? ( $parsed_args['method'] ?? 'GET' ) ),
+            'timeout' => (float) ( $started['timeout'] ?? ( $parsed_args['timeout'] ?? 0 ) ),
+            'blocking' => isset( $started['blocking'] ) ? (bool) $started['blocking'] : true,
+            'status' => $status,
+            'error' => $error,
+        );
+    }
+
+    public static function shutdown() {
+        global $wpdb, $EZSQL_ERROR;
+        $php_ms = ( microtime( true ) - self::$start ) * 1000;
+        $db_ms = 0.0;
+        $query_count = (int) $wpdb->num_queries;
+        $run_payload = array();
+        $queries_by_pattern = array();
+        $deep = defined( 'WPI_DEEP_DIAGNOSTIC' ) && WPI_DEEP_DIAGNOSTIC;
+        $trace_map = self::trace_map();
+
+        if ( isset( $wpdb->queries ) && is_array( $wpdb->queries ) ) {
+            foreach ( array_slice( $wpdb->queries, 0, 7500 ) as $q ) {
+                $sql = (string) ( $q[0] ?? '' );
+                $sec = (float) ( $q[1] ?? 0 );
+                $db_ms += $sec * 1000;
+                if ( ! $deep ) { continue; }
+                $norm = WPI_Utils::normalize_sql( $sql );
+                $rawhash = md5( $sql );
+                $trace = array();
+                if ( ! empty( $trace_map[ $rawhash ] ) ) { $trace = array_shift( $trace_map[ $rawhash ] ); }
+                $comp = WPI_Utils::component_from_trace( $trace );
+                $hash = md5( $norm . '|' . $comp['type'] . '|' . $comp['slug'] );
+                if ( ! isset( $queries_by_pattern[ $hash ] ) ) {
+                    $queries_by_pattern[ $hash ] = array( 'sql' => $norm, 'count' => 0, 'total' => 0, 'max' => 0, 'component' => $comp, 'raw' => $sql );
+                }
+                $queries_by_pattern[ $hash ]['count']++;
+                $queries_by_pattern[ $hash ]['total'] += $sec * 1000;
+                $queries_by_pattern[ $hash ]['max'] = max( $queries_by_pattern[ $hash ]['max'], $sec * 1000 );
+            }
+        }
+
+        $http_ms = array_sum( array_map( static function ( $r ) { return (float) $r['ms']; }, self::$http ) );
+        $route = $deep ? WPI_Utils::route() : WPI_Utils::route_group();
+        $phases = self::phase_durations();
+        $run_payload['http'] = array_slice( self::$http, 0, 100 );
+        $run_payload['deep'] = $deep;
+        $run_payload['phases'] = $phases;
+        $run_payload['hook_ms'] = array_map( static function ( $v ) { return round( $v, 3 ); }, self::$hook_totals );
+        $run_payload['database_errors'] = self::database_errors( (array) $EZSQL_ERROR, $trace_map );
+        $run_payload['included_files'] = count( get_included_files() );
+        $run_payload['query_timing_available'] = defined( 'SAVEQUERIES' ) && SAVEQUERIES;
+
+        $wpdb->insert( WPI_Utils::table( 'runs' ), array(
+            'created_at' => WPI_Utils::now_mysql(), 'route' => $route, 'mode' => $deep ? 'deep' : 'sample',
+            'php_ms' => round( $php_ms, 3 ), 'db_ms' => round( $db_ms, 3 ), 'query_count' => $query_count,
+            'http_ms' => round( $http_ms, 3 ), 'http_count' => count( self::$http ), 'memory_peak' => memory_get_peak_usage( true ),
+            'payload' => wp_json_encode( $run_payload ),
+        ) );
+        $run_id = (int) $wpdb->insert_id;
+        self::persist_option_usage();
+
+        WPI_Utils::begin_issue_collection( $deep ? 'manual' : 'passive', $run_id );
+        if ( $deep ) { self::persist_queries( $run_id, $queries_by_pattern, $route ); }
+        self::request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, $run_payload );
+        self::http_issues( $route );
+        self::fatal_issue( $route );
+        WPI_Utils::end_issue_collection();
+    }
+
+
+    private static function persist_option_usage() {
+        if ( empty( self::$option_hits ) ) { return; }
+        global $wpdb;
+        $table = WPI_Utils::table( 'option_usage' );
+        $now = WPI_Utils::now_mysql();
+        $chunks = array(); $args = array();
+        foreach ( array_slice( self::$option_hits, 0, 750, true ) as $name => $hits ) {
+            $chunks[] = '(%s,%s,%d,1)';
+            array_push( $args, $name, $now, (int) $hits );
+        }
+        if ( ! $chunks ) { return; }
+        $sql = "INSERT INTO {$table} (option_name,last_seen,hits,sampled_requests) VALUES " . implode( ',', $chunks ) . ' ON DUPLICATE KEY UPDATE last_seen=VALUES(last_seen),hits=hits+VALUES(hits),sampled_requests=sampled_requests+1';
+        $wpdb->query( $wpdb->prepare( $sql, $args ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+    }
+
+    private static function trace_map() {
+        $trace_map = array();
+        foreach ( (array) ( $GLOBALS['wpi_query_traces'] ?? array() ) as $t ) {
+            if ( isset( $t['sql_hash'], $t['trace'] ) ) { $trace_map[ $t['sql_hash'] ][] = $t['trace']; }
+        }
+        return $trace_map;
+    }
+
+    private static function database_errors( array $errors, array $trace_map ) {
+        $out = array();
+        foreach ( array_slice( $errors, -50 ) as $error ) {
+            $sql = (string) ( $error['query'] ?? '' );
+            if ( self::is_expected_diagnostic_error( $sql, (string) ( $error['error_str'] ?? '' ) ) ) { continue; }
+            $trace = array();
+            $hash = md5( $sql );
+            if ( ! empty( $trace_map[ $hash ] ) ) { $trace = array_shift( $trace_map[ $hash ] ); }
+            $component = WPI_Utils::component_from_trace( $trace );
+            $item = array(
+                'error' => sanitize_text_field( mb_substr( (string) ( $error['error_str'] ?? 'Database error' ), 0, 500 ) ),
+                'query' => WPI_Utils::normalize_sql( $sql ),
+                'component' => $component,
+            );
+            $out[] = $item;
+            WPI_Utils::issue( 'database', 'critical', 'Database query error from ' . $component['slug'], esc_html( $item['error'] ) . '<br><code>' . esc_html( mb_substr( $item['query'], 0, 900 ) ) . '</code>', 'Query failed', 'Fix the SQL/schema/plugin error before performance tuning. Repeated failed queries can create retries and expensive fallback behaviour.', WPI_Utils::route() );
+        }
+        return $out;
+    }
+
+    public static function is_expected_diagnostic_error( $sql, $error = '' ) {
+        $haystack = strtolower( (string) $sql . ' ' . (string) $error );
+        foreach ( array( 'information_schema.innodb_lock_waits', 'information_schema.innodb_trx', 'performance_schema.data_lock_waits', 'performance_schema.data_locks' ) as $optional_table ) {
+            if ( false !== strpos( $haystack, $optional_table ) && ( false !== strpos( $haystack, 'doesn\'t exist' ) || false !== strpos( $haystack, 'unknown table' ) || false !== strpos( $haystack, 'denied' ) ) ) { return true; }
+        }
+        return false;
+    }
+
+    private static function phase_durations() {
+        $marks = (array) ( $GLOBALS['wpi_phase_marks'] ?? array() );
+        $order = array( 'mu_plugin_bootstrap','muplugins_loaded','plugins_loaded','setup_theme','after_setup_theme','init','wp_loaded','wp','template_redirect','wp_head','wp_footer' );
+        $out = array();
+        $previous = null;
+        $previous_name = '';
+        foreach ( $order as $name ) {
+            if ( ! isset( $marks[ $name ] ) ) { continue; }
+            if ( null !== $previous ) { $out[ $previous_name . '_to_' . $name ] = round( ( $marks[ $name ] - $previous ) * 1000, 3 ); }
+            $previous = (float) $marks[ $name ];
+            $previous_name = $name;
+        }
+        return $out;
+    }
+
+    private static function persist_queries( $run_id, $patterns, $route ) {
+        global $wpdb;
+        uasort( $patterns, static function ( $a, $b ) { return $b['total'] <=> $a['total']; } );
+        foreach ( array_slice( $patterns, 0, 350, true ) as $hash => $p ) {
+            $explain = array();
+            if ( $p['max'] >= 25 && preg_match( '/^\s*(SELECT|WITH)\b/i', $p['raw'] ) ) { $explain = self::safe_explain( $p['raw'] ); }
+            $analysis = self::analyze_query( $p, $explain );
+            $c = $p['component'];
+            $wpdb->insert( WPI_Utils::table( 'queries' ), array(
+                'run_id' => $run_id, 'pattern_hash' => $hash, 'normalized_sql' => $p['sql'], 'count' => $p['count'],
+                'total_ms' => round( $p['total'], 3 ), 'max_ms' => round( $p['max'], 3 ), 'component_type' => $c['type'],
+                'component_slug' => $c['slug'], 'source_file' => $c['file'], 'source_line' => $c['line'], 'explain_json' => wp_json_encode( array( 'plan' => $explain, 'analysis' => $analysis ) ),
+            ) );
+            if ( $analysis['problem'] ) {
+                $severity = ( $p['total'] >= 500 || $p['max'] >= 500 || $analysis['rows_examined_estimate'] >= 1000000 ) ? 'critical' : 'high';
+                $details = array_filter( $analysis['reasons'] );
+                WPI_Utils::issue( 'database', $severity, 'Expensive query from ' . $c['slug'], '<code>' . esc_html( mb_substr( $p['sql'], 0, 1200 ) ) . '</code><br>' . esc_html( implode( '; ', $details ) ), round( $p['total'] ) . ' ms total / ' . intval( $p['count'] ) . ' calls', self::query_recommendation( $analysis ), $route );
+            }
+        }
+    }
+
+    private static function safe_explain( $sql ) {
+        global $wpdb;
+        $old = $wpdb->suppress_errors( true );
+        $rows = $wpdb->get_results( 'EXPLAIN ' . $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $wpdb->suppress_errors( $old );
+        return is_array( $rows ) ? array_slice( $rows, 0, 25 ) : array();
+    }
+
+    private static function analyze_query( array $p, array $explain ) {
+        $reasons = array();
+        $rows = 0;
+        $full_scan = false;
+        $filesort = false;
+        $temporary = false;
+        $no_key = false;
+        foreach ( $explain as $row ) {
+            $rows += (int) ( $row['rows'] ?? 0 );
+            if ( 'ALL' === strtoupper( (string) ( $row['type'] ?? '' ) ) ) { $full_scan = true; }
+            $extra = strtolower( (string) ( $row['Extra'] ?? '' ) );
+            if ( false !== strpos( $extra, 'filesort' ) ) { $filesort = true; }
+            if ( false !== strpos( $extra, 'temporary' ) ) { $temporary = true; }
+            if ( empty( $row['key'] ) && ! empty( $row['possible_keys'] ) ) { $no_key = true; }
+        }
+        if ( $p['count'] >= 20 ) { $reasons[] = intval( $p['count'] ) . ' repeated executions (possible N+1/duplicate query)'; }
+        if ( $p['max'] >= 100 ) { $reasons[] = round( $p['max'] ) . ' ms maximum execution'; }
+        if ( $p['total'] >= 100 ) { $reasons[] = round( $p['total'] ) . ' ms cumulative database time'; }
+        if ( $full_scan ) { $reasons[] = 'EXPLAIN reports a full table scan'; }
+        if ( $rows >= 100000 ) { $reasons[] = 'EXPLAIN estimates about ' . number_format_i18n( $rows ) . ' rows examined'; }
+        if ( $filesort ) { $reasons[] = 'EXPLAIN reports filesort'; }
+        if ( $temporary ) { $reasons[] = 'EXPLAIN reports a temporary table'; }
+        if ( $no_key ) { $reasons[] = 'possible indexes exist but no key was selected'; }
+        if ( preg_match( '/ORDER BY\s+RAND\s*\(/i', $p['raw'] ) ) { $reasons[] = 'ORDER BY RAND() scales poorly'; }
+        if ( preg_match( '/SQL_CALC_FOUND_ROWS/i', $p['raw'] ) ) { $reasons[] = 'SQL_CALC_FOUND_ROWS adds counting work'; }
+        if ( preg_match( '/LIKE\s+[\'\"]%/i', $p['raw'] ) ) { $reasons[] = 'leading-wildcard LIKE can prevent index use'; }
+        if ( preg_match( '/\bSELECT\s+\*/i', $p['raw'] ) && $rows >= 10000 ) { $reasons[] = 'SELECT * over a large estimated result'; }
+        if ( substr_count( strtolower( $p['raw'] ), 'postmeta' ) >= 2 ) { $reasons[] = 'multiple postmeta joins can multiply row work'; }
+        $candidate = ( $full_scan || $no_key ) ? self::candidate_index( $p['raw'], $explain ) : array();
+        if ( ! empty( $candidate['sql'] ) ) { $reasons[] = 'review-only index candidate: ' . $candidate['columns_text']; }
+        return array(
+            'problem' => ! empty( $reasons ), 'reasons' => $reasons, 'rows_examined_estimate' => $rows,
+            'full_scan' => $full_scan, 'filesort' => $filesort, 'temporary' => $temporary, 'no_key_selected' => $no_key,
+            'index_candidate' => $candidate,
+        );
+    }
+
+    /**
+     * Generate a conservative, review-only candidate for simple single-table SELECTs.
+     * It never executes DDL and refuses joins, text/blob columns and cases where an
+     * existing index already covers the candidate left-prefix.
+     */
+    private static function candidate_index( $sql, array $explain ) {
+        global $wpdb;
+        if ( count( $explain ) !== 1 || preg_match( '/\b(JOIN|UNION)\b/i', (string) $sql ) ) { return array(); }
+        if ( ! preg_match( '/\bFROM\s+`?([A-Za-z0-9_]+)`?/i', (string) $sql, $m ) ) { return array(); }
+        $table = (string) $m[1];
+        if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) { return array(); }
+        $old = $wpdb->suppress_errors( true );
+        $columns = $wpdb->get_results( 'SHOW COLUMNS FROM `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $indexes = $wpdb->get_results( 'SHOW INDEX FROM `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        $wpdb->suppress_errors( $old );
+        if ( ! is_array( $columns ) || ! $columns ) { return array(); }
+        $allowed = array();
+        foreach ( $columns as $column ) {
+            $name = (string) ( $column['Field'] ?? '' );
+            $type = strtolower( (string) ( $column['Type'] ?? '' ) );
+            if ( ! $name || preg_match( '/\b(text|blob|json|geometry)\b/', $type ) ) { continue; }
+            $allowed[ strtolower( $name ) ] = $name;
+        }
+        $where = '';
+        if ( preg_match( '/\bWHERE\b(.+?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bLIMIT\b|$)/is', (string) $sql, $m ) ) { $where = $m[1]; }
+        if ( ! $where ) { return array(); }
+        $equality = array(); $range = array();
+        if ( preg_match_all( '/(?:`?[A-Za-z0-9_]+`?\.)?`?([A-Za-z0-9_]+)`?\s*(=|<=>|IN\s*\(|IS\s+(?:NULL|NOT\s+NULL)|>=|<=|>|<|BETWEEN\b)/i', $where, $matches, PREG_SET_ORDER ) ) {
+            foreach ( $matches as $match ) {
+                $key = strtolower( (string) $match[1] );
+                if ( ! isset( $allowed[ $key ] ) ) { continue; }
+                $name = $allowed[ $key ];
+                $op = strtoupper( preg_replace( '/\s+/', ' ', trim( (string) $match[2] ) ) );
+                if ( in_array( $op, array( '=','<=>','IS NULL','IS NOT NULL' ), true ) || 0 === strpos( $op, 'IN' ) ) { $equality[ $name ] = true; }
+                else { $range[ $name ] = true; }
+            }
+        }
+        $order = array();
+        if ( preg_match( '/\bORDER\s+BY\b(.+?)(?:\bLIMIT\b|$)/is', (string) $sql, $m ) ) {
+            if ( preg_match_all( '/(?:`?[A-Za-z0-9_]+`?\.)?`?([A-Za-z0-9_]+)`?(?:\s+(?:ASC|DESC))?/i', $m[1], $om ) ) {
+                foreach ( (array) ( $om[1] ?? array() ) as $name ) { $key = strtolower( $name ); if ( isset( $allowed[ $key ] ) ) { $order[ $allowed[ $key ] ] = true; } }
+            }
+        }
+        $candidate = array_keys( $equality );
+        if ( $range ) { $candidate[] = array_key_first( $range ); }
+        foreach ( array_keys( $order ) as $name ) { if ( ! in_array( $name, $candidate, true ) ) { $candidate[] = $name; } }
+        $candidate = array_slice( array_values( array_unique( $candidate ) ), 0, 4 );
+        if ( ! $candidate ) { return array(); }
+
+        $grouped = array();
+        foreach ( (array) $indexes as $row ) {
+            $name = (string) ( $row['Key_name'] ?? '' );
+            $seq = max( 1, (int) ( $row['Seq_in_index'] ?? 1 ) );
+            $column = (string) ( $row['Column_name'] ?? '' );
+            if ( $name && $column ) { $grouped[ $name ][ $seq ] = $column; }
+        }
+        foreach ( $grouped as $cols ) {
+            ksort( $cols ); $cols = array_values( $cols );
+            $covered = true;
+            foreach ( $candidate as $i => $column ) { if ( ! isset( $cols[ $i ] ) || 0 !== strcasecmp( $cols[ $i ], $column ) ) { $covered = false; break; } }
+            if ( $covered ) { return array(); }
+        }
+        $safe_parts = array();
+        foreach ( $candidate as $column ) { $safe_parts[] = '`' . $column . '`'; }
+        $name = 'wpi_candidate_' . substr( md5( $table . ':' . implode( ',', $candidate ) ), 0, 10 );
+        $rows_estimate = (int) ( $explain[0]['rows'] ?? 0 );
+        return array(
+            'table' => $table,
+            'columns' => $candidate,
+            'columns_text' => $table . '(' . implode( ', ', $candidate ) . ')',
+            'sql' => 'ALTER TABLE `' . $table . '` ADD INDEX `' . $name . '` (' . implode( ',', $safe_parts ) . ')',
+            'rows_examined_estimate' => $rows_estimate,
+            'automatic' => false,
+            'warning' => 'Candidate only. Verify selectivity, EXPLAIN improvement, index size and write amplification before creating it.',
+        );
+    }
+
+    private static function query_recommendation( array $analysis ) {
+        $parts = array();
+        if ( $analysis['full_scan'] || $analysis['no_key_selected'] ) { $parts[] = 'Review predicates and the EXPLAIN plan for a selective composite index rather than adding indexes blindly.'; }
+        if ( $analysis['filesort'] || $analysis['temporary'] ) { $parts[] = 'Reduce/sort a smaller result set and check whether an index can satisfy WHERE + ORDER BY/GROUP BY.'; }
+        if ( ! empty( $analysis['index_candidate']['sql'] ) ) { $parts[] = 'WPI generated a review-only candidate index: <code>' . esc_html( $analysis['index_candidate']['sql'] ) . '</code> Test EXPLAIN and write/storage impact on staging before adding it.'; }
+        $parts[] = 'If the same result repeats within one request, cache/prime it or batch the lookup.';
+        return implode( ' ', $parts );
+    }
+
+    private static function request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, array $payload ) {
+        if ( defined( 'WPI_QUERY_TIMING_BLOCKED' ) && WPI_QUERY_TIMING_BLOCKED ) {
+            WPI_Utils::issue( 'database', 'warning', 'Deep query timing is blocked by configuration', 'SAVEQUERIES is explicitly defined as false, so WordPress will not retain per-query timing even for this private diagnostic request.', 'Slow-query timing unavailable', 'Remove the explicit false SAVEQUERIES definition while running a signed diagnostic, or use database slow-query/performance-schema tooling at the server layer.', $route );
+        }
+        $known_dominant = ( $db_ms >= 250 && $db_ms >= $php_ms * 0.45 ) || ( self::has_actionable_http() && $http_ms >= $php_ms * 0.35 );
+        if ( $php_ms > 1500 && ! $known_dominant ) {
+            WPI_Utils::issue( 'request', 'critical', 'Very slow PHP request', 'This sampled request required more than 1.5 seconds of PHP execution.', round( $php_ms ) . ' ms', 'Inspect database, external HTTP, hook/phase and plugin evidence for the dominant contributor.', $route );
+        } elseif ( $php_ms > 750 && ! $known_dominant ) {
+            WPI_Utils::issue( 'request', 'high', 'Slow PHP request', 'This sampled request required more than 750 ms of PHP execution.', round( $php_ms ) . ' ms', 'Inspect database, external HTTP, hook/phase and plugin evidence for the dominant contributor.', $route );
+        }
+        if ( $db_ms > 500 ) {
+            WPI_Utils::issue( 'database', 'critical', 'Database time dominates a request', 'SQL execution consumed approximately ' . round( $db_ms ) . ' ms in this sampled request.', round( $db_ms ) . ' ms DB time', 'Run a signed deep profile to identify the query patterns responsible.', $route );
+        } elseif ( $db_ms > 250 ) {
+            WPI_Utils::issue( 'database', 'high', 'Database time is elevated on a request', 'SQL execution consumed approximately ' . round( $db_ms ) . ' ms.', round( $db_ms ) . ' ms DB time', 'Run a signed deep profile and prioritize queries by cumulative time, not query count alone.', $route );
+        }
+        if ( $query_count > 1000 ) {
+            WPI_Utils::issue( 'database', 'critical', 'Extremely high query count on a request', number_format_i18n( $query_count ) . ' SQL queries executed.', number_format_i18n( $query_count ) . ' queries', 'Look for duplicate/N+1 query patterns and plugins repeatedly loading metadata/options.', $route );
+        } elseif ( $query_count > 400 ) {
+            WPI_Utils::issue( 'database', 'high', 'High query count on a request', number_format_i18n( $query_count ) . ' SQL queries executed.', number_format_i18n( $query_count ) . ' queries', 'Run a deep profile and group queries by normalized pattern and component.', $route );
+        }
+        if ( $http_ms > 750 && ! self::has_actionable_http() ) {
+            WPI_Utils::issue( 'http', 'high', 'Outbound HTTP calls add substantial request latency', 'Blocking HTTP activity consumed approximately ' . round( $http_ms ) . ' ms.', round( $http_ms ) . ' ms HTTP time', 'Cache remote data and move non-essential API synchronization out of page requests.', $route );
+        }
+        $limit = WPI_Utils::ini_bytes( defined( 'WP_MEMORY_LIMIT' ) ? WP_MEMORY_LIMIT : ini_get( 'memory_limit' ) );
+        $peak = memory_get_peak_usage( true );
+        if ( $limit > 0 && $peak / $limit > 0.85 ) {
+            WPI_Utils::issue( 'server', 'high', 'Request is close to its PHP memory limit', 'Peak memory was ' . esc_html( size_format( $peak ) ) . ' of approximately ' . esc_html( size_format( $limit ) ) . '.', round( 100 * $peak / $limit, 1 ) . '% of limit', 'Find large result sets, unbounded object hydration, image operations or plugins retaining large arrays before raising the memory limit.', $route );
+        }
+        foreach ( $payload['hook_ms'] as $hook => $ms ) {
+            if ( $ms >= 200 ) {
+                WPI_Utils::issue( 'hooks', 'high', 'Slow WordPress hook: ' . $hook, 'Callbacks on <code>' . esc_html( $hook ) . '</code> consumed approximately ' . round( $ms ) . ' ms in total.', round( $ms ) . ' ms', 'Inspect callbacks registered to this hook and correlate them with plugin exclusion/query evidence.', $route );
+            }
+        }
+    }
+
+    private static function has_actionable_http() {
+        foreach ( self::$http as $item ) {
+            if ( ! empty( $item['error'] ) || (int) ( $item['status'] ?? 0 ) >= 400 || ( ! empty( $item['blocking'] ) && (float) ( $item['ms'] ?? 0 ) >= 300 ) ) { return true; }
+        }
+        return false;
+    }
+
+    private static function http_issues( $route ) {
+        foreach ( self::$http as $item ) {
+            $component = $item['component']['slug'] ?? 'unknown';
+            if ( $item['error'] ) {
+                WPI_Utils::issue( 'http', 'critical', 'Outbound HTTP request failed from ' . $component, esc_html( $item['host'] . $item['path'] . ': ' . $item['error'] ), round( $item['ms'] ) . ' ms', 'Handle the failure without blocking normal page generation, and verify DNS/TLS/API availability and timeouts.', $route );
+            } elseif ( $item['status'] >= 400 ) {
+                WPI_Utils::issue( 'http', 'high', 'Outbound HTTP request returned an error status from ' . $component, esc_html( $item['host'] . $item['path'] . ' returned HTTP ' . $item['status'] ), round( $item['ms'] ) . ' ms', 'Fix the integration endpoint/authentication and avoid retrying failed requests on every page load.', $route );
+            } elseif ( $item['blocking'] && $item['ms'] >= 300 ) {
+                WPI_Utils::issue( 'http', $item['ms'] >= 1000 ? 'critical' : 'high', 'Slow blocking HTTP request from ' . $component, esc_html( $item['host'] . $item['path'] ) . ' blocked PHP for approximately ' . round( $item['ms'] ) . ' ms.', round( $item['ms'] ) . ' ms', 'Cache the response or move synchronization to cron/Action Scheduler/background processing.', $route );
+            }
+        }
+    }
+
+    private static function fatal_issue( $route ) {
+        $last = error_get_last();
+        if ( ! is_array( $last ) || ! in_array( (int) $last['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ), true ) ) { return; }
+        $component = WPI_Utils::component_from_file( $last['file'] ?? '' );
+        WPI_Utils::issue( 'errors', 'critical', 'Fatal PHP error during sampled request', '<code>' . esc_html( $component['type'] . ':' . $component['slug'] ) . '</code><br>' . esc_html( mb_substr( (string) $last['message'], 0, 700 ) ), 'Request may fail completely', 'Fix the fatal error before performance tuning. Repeated fatals can also prevent cron, cache warming and background jobs from completing.', $route );
+    }
+
+    public static function site_health( $tests ) {
+        $tests['direct']['wpi_bootstrap'] = array( 'label' => 'Performance Inspector bootstrap', 'test' => static function () {
+            $s = WPI_Bootstrap::status();
+            return array( 'label' => $s['installed'] ? 'Performance Inspector early bootstrap is installed' : 'Performance Inspector early bootstrap is missing', 'status' => $s['installed'] ? 'good' : 'recommended', 'badge' => array( 'label' => 'Performance' ), 'description' => '<p>' . ( $s['installed'] ? 'Deep diagnostics and sampled query timing can begin before normal plugins load.' : 'Install the MU bootstrap to enable early plugin/query diagnostics.' ) . '</p>', 'actions' => '' );
+        } );
+        return $tests;
+    }
+}
