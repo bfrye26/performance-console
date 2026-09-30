@@ -1,10 +1,14 @@
 <?php
 /** WP Performance Inspector early diagnostic/bootstrap sampler.
- * WPI Bootstrap Version: 1.3.0
+ * WPI Bootstrap Version: 1.3.1
  */
 if ( ! defined( 'ABSPATH' ) ) { return; }
 
 $wpi_basename = '{{PLUGIN_BASENAME}}';
+// A leftover MU file must not trace or alter requests after WPI is deactivated.
+$wpi_active = (array) get_option( 'active_plugins', array() );
+$wpi_network_active = is_multisite() ? (array) get_site_option( 'active_sitewide_plugins', array() ) : array();
+if ( ! in_array( $wpi_basename, $wpi_active, true ) && ! isset( $wpi_network_active[ $wpi_basename ] ) ) { return; }
 $wpi_deep = false;
 $wpi_signed_diag = false;
 $wpi_exclude = '';
@@ -39,29 +43,11 @@ if ( ! $wpi_deep && $wpi_secret && ! empty( $_COOKIE['wpi_capture_save'] ) ) {
 
         $wpi_method = strtoupper( (string) ( $_SERVER['REQUEST_METHOD'] ?? 'GET' ) );
         $wpi_uri = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
-        $wpi_path = (string) wp_parse_url( $wpi_uri, PHP_URL_PATH );
-        $wpi_action = sanitize_key( (string) ( $_REQUEST['action'] ?? '' ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $wpi_context = array();
-        if ( $wpi_valid_cookie && in_array( $wpi_method, array( 'POST', 'PUT', 'PATCH' ), true ) ) {
-            if ( preg_match( '#/wp-admin/post\.php$#', $wpi_path ) && in_array( $wpi_action, array( 'editpost', 'post' ), true ) ) {
-                $wpi_context = array( 'kind' => 'classic', 'autosave' => false, 'post_id' => absint( $_REQUEST['post_ID'] ?? 0 ), 'post_type' => sanitize_key( (string) ( $_REQUEST['post_type'] ?? '' ) ), 'method' => $wpi_method ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            } elseif ( preg_match( '#/wp-admin/admin-ajax\.php$#', $wpi_path ) && 'inline-save' === $wpi_action ) {
-                $wpi_context = array( 'kind' => 'quick-edit', 'autosave' => false, 'post_id' => absint( $_REQUEST['post_ID'] ?? 0 ), 'post_type' => sanitize_key( (string) ( $_REQUEST['post_type'] ?? '' ) ), 'method' => $wpi_method ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            } elseif ( preg_match( '#/wp-admin/admin-ajax\.php$#', $wpi_path ) && 'autosave' === $wpi_action ) {
-                $wpi_context = array( 'kind' => 'classic-autosave', 'autosave' => true, 'post_id' => absint( $_REQUEST['post_id'] ?? 0 ), 'post_type' => sanitize_key( (string) ( $_REQUEST['post_type'] ?? '' ) ), 'method' => $wpi_method ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-            } else {
-                $wpi_rest_path = '';
-                if ( false !== strpos( $wpi_path, '/wp-json/' ) ) { $wpi_rest_path = substr( $wpi_path, strpos( $wpi_path, '/wp-json/' ) + 8 ); }
-                elseif ( ! empty( $_GET['rest_route'] ) ) { $wpi_rest_path = (string) wp_unslash( $_GET['rest_route'] ); } // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-                $wpi_rest_path = '/' . ltrim( $wpi_rest_path, '/' );
-                if ( preg_match( '#^/(wp/v2|wc/v3)/([^/]+)(?:/(\d+))?(/autosaves)?(?:/|$)#', $wpi_rest_path, $wpi_rest_match ) ) {
-                    $wpi_resource = sanitize_key( $wpi_rest_match[2] );
-                    $wpi_ignored = array( 'media','comments','users','settings','search','types','statuses','taxonomies' );
-                    if ( ! in_array( $wpi_resource, $wpi_ignored, true ) ) {
-                        $wpi_context = array( 'kind' => ! empty( $wpi_rest_match[4] ) ? 'rest-autosave' : 'rest', 'autosave' => ! empty( $wpi_rest_match[4] ), 'post_id' => absint( $wpi_rest_match[3] ?? 0 ), 'post_type' => $wpi_resource, 'method' => $wpi_method );
-                    }
-                }
-            }
+        $wpi_utils_file = dirname( WP_PLUGIN_DIR . '/' . $wpi_basename ) . '/includes/class-wpi-utils.php';
+        if ( $wpi_valid_cookie && is_readable( $wpi_utils_file ) ) {
+            require_once $wpi_utils_file;
+            $wpi_context = WPI_Utils::save_request_context( $wpi_method, $wpi_uri, wp_unslash( $_REQUEST ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         }
         $wpi_kind_matches = $wpi_context && ( ( 'autosave' === $wpi_capture_kind ) === ! empty( $wpi_context['autosave'] ) );
         if ( $wpi_kind_matches ) {
@@ -82,6 +68,7 @@ if ( ! $wpi_deep ) {
     if ( $wpi_rate > 0 ) { $wpi_sample = mt_rand() / mt_getrandmax() <= $wpi_rate; }
 }
 
+if ( ! defined( 'WPI_SAMPLING_DECIDED' ) ) { define( 'WPI_SAMPLING_DECIDED', true ); }
 if ( ! $wpi_deep && ! $wpi_sample ) { return; }
 
 if ( $wpi_deep && ! defined( 'WPI_DEEP_DIAGNOSTIC' ) ) { define( 'WPI_DEEP_DIAGNOSTIC', true ); }

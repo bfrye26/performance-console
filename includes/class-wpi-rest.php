@@ -102,7 +102,8 @@ final class WPI_REST {
         $r = get_option( 'wpi_runtime', array() );
         $rate = max( 0, min( 1, (float) ( $r['rum_rate'] ?? 0.005 ) ) );
         if ( $rate <= 0 ) { return; }
-        wp_enqueue_script( 'wpi-rum', WPI_URL . 'assets/js/rum.js', array(), WPI_VERSION, true );
+        wp_enqueue_script( 'wpi-web-vitals', WPI_URL . 'assets/vendor/web-vitals/web-vitals.iife.js', array(), '6.2.1', true );
+        wp_enqueue_script( 'wpi-rum', WPI_URL . 'assets/js/rum.js', array( 'wpi-web-vitals' ), WPI_VERSION, true );
         wp_localize_script( 'wpi-rum', 'wpiRum', array(
             'endpoint' => rest_url( 'wpi/v1/rum' ),
             'tokenEndpoint' => rest_url( 'wpi/v1/rum-token' ),
@@ -129,7 +130,8 @@ final class WPI_REST {
         if ( ! self::rate_limit( 'ingest', 60 ) ) { return new WP_Error( 'wpi_rum_rate', __( 'RUM ingestion rate limit reached.', 'wp-performance-inspector' ), array( 'status' => 429 ) ); }
         if ( ! is_array( $m ) || ! self::valid_rum_token( $m ) ) { return new WP_Error( 'wpi_rum_token', __( 'Invalid or expired RUM token.', 'wp-performance-inspector' ), array( 'status' => 403 ) ); }
         $route_group = self::clean_route_group( $m['route_group'] ?? '' );
-        $hash = md5( $route_group );
+        $metric_version = 2 === (int) ( $m['metric_version'] ?? 1 ) ? 2 : 1;
+        $hash = md5( $metric_version . '|' . $route_group );
         $bucket = gmdate( 'Y-m-d H:00:00' );
         $limits = array( 'ttfb' => 600000, 'fcp' => 600000, 'lcp' => 600000, 'inp' => 600000, 'cls' => 10 );
         $values = array();
@@ -144,8 +146,8 @@ final class WPI_REST {
         foreach ( $values as $metric => $value ) {
             $bucket_index = self::metric_bucket( $metric, $value );
             $bucket_column = 'bucket_' . $bucket_index;
-            $sql = "INSERT INTO {$table} (bucket,metric,route_hash,route_group,samples,value_sum,value_max,{$bucket_column}) VALUES (%s,%s,%s,%s,1,%f,%f,1) ON DUPLICATE KEY UPDATE route_group=VALUES(route_group),samples=samples+1,value_sum=value_sum+VALUES(value_sum),value_max=GREATEST(value_max,VALUES(value_max)),{$bucket_column}={$bucket_column}+1";
-            $wpdb->query( $wpdb->prepare( $sql, $bucket, $metric, $hash, $route_group, $value, $value ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $sql = "INSERT INTO {$table} (bucket,metric,route_hash,route_group,metric_version,samples,value_sum,value_max,{$bucket_column}) VALUES (%s,%s,%s,%s,%d,1,%f,%f,1) ON DUPLICATE KEY UPDATE route_group=VALUES(route_group),samples=samples+1,value_sum=value_sum+VALUES(value_sum),value_max=GREATEST(value_max,VALUES(value_max)),{$bucket_column}={$bucket_column}+1";
+            $wpdb->query( $wpdb->prepare( $sql, $bucket, $metric, $hash, $route_group, $metric_version, $value, $value ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         }
         return rest_ensure_response( array( 'ok' => true, 'stored' => count( $values ) ) );
     }

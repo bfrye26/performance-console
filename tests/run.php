@@ -101,6 +101,75 @@ test_case( 'backup primary-key discovery uses portable SHOW INDEX syntax', stati
     assert_same( false, false !== strpos( $source, "WHERE Key_name='PRIMARY' ORDER BY" ) );
 } );
 
+test_case( 'save success requires a matching write and successful response', static function (): void {
+    $context = array( 'post_id' => 42 );
+    assert_same( true, WPI_Profiler::save_outcome( $context, array( 42 => 'post' ), 302 )['successful'] );
+    assert_same( false, WPI_Profiler::save_outcome( $context, array(), 200 )['successful'] );
+    assert_same( false, WPI_Profiler::save_outcome( $context, array( 43 => 'post' ), 200 )['successful'] );
+    assert_same( false, WPI_Profiler::save_outcome( $context, array( 42 => 'post' ), 403 )['successful'] );
+    assert_same( false, WPI_Profiler::save_outcome( $context, array( 42 => 'post' ), 200, true )['successful'] );
+} );
+
+test_case( 'save comparisons reject different editors, posts, users and kinds', static function (): void {
+    $context = array( 'post_id' => 42, 'post_type' => 'post', 'requested_kind' => 'manual', 'kind' => 'classic-editor', 'user_id' => 7 );
+    assert_same( true, WPI_Profiler::comparable_save( $context, $context ) );
+    foreach ( array_keys( $context ) as $key ) {
+        $different = $context; $different[ $key ] = 'different';
+        assert_same( false, WPI_Profiler::comparable_save( $context, $different ) );
+    }
+    assert_same( false, WPI_Profiler::comparable_save( array(), $context ) );
+} );
+
+test_case( 'save parser rejects taxonomy and nested non-save REST endpoints', static function (): void {
+    foreach ( array( '/wp-json/wp/v2/categories/42', '/wp-json/wp/v2/tags/42', '/wp-json/wp/v2/posts/42/revisions', '/wp-json/wp/v2/posts/42/arbitrary' ) as $uri ) {
+        assert_same( false, WPI_Utils::save_request_context( 'POST', $uri, array() ) );
+    }
+} );
+
+foreach ( array(
+    'inactive' => array( 'decided' => false, 'queries' => false, 'sampled' => false ),
+    'declined' => array( 'decided' => true, 'queries' => false, 'sampled' => false ),
+    'network' => array( 'decided' => true, 'queries' => false, 'sampled' => false ),
+    'sampled' => array( 'decided' => true, 'queries' => true, 'sampled' => true ),
+) as $scenario => $expected ) {
+    test_case( 'production MU bootstrap: ' . $scenario, static function () use ( $scenario, $expected ): void {
+        $output = array(); $code = 0;
+        exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/bootstrap.php' ) . ' ' . escapeshellarg( $scenario ), $output, $code );
+        assert_same( 0, $code );
+        assert_same( $expected, json_decode( implode( '', $output ), true ) );
+    } );
+}
+
+test_case( 'autoload reviews require real frontend and admin coverage', static function (): void {
+    assert_same( false, WPI_Utils::autoload_review_ready( array(), 30 ) );
+    assert_same( false, WPI_Utils::autoload_review_ready( array( 'total' => 100, 'frontend' => 100, 'admin' => 0 ), 30 ) );
+    assert_same( false, WPI_Utils::autoload_review_ready( array( 'total' => 100, 'frontend' => 20, 'admin' => 20 ), 6 ) );
+    assert_same( true, WPI_Utils::autoload_review_ready( array( 'total' => 100, 'frontend' => 20, 'admin' => 20 ), 7 ) );
+} );
+
+test_case( 'plugin impact content assertions reject missing output', static function (): void {
+    assert_same( true, WPI_Utils::response_contains_text( '<h1>Review &amp; test</h1>', 'Review & test' ) );
+    assert_same( true, WPI_Utils::response_contains_text( "<h1>Review\n  test</h1>", 'Review test' ) );
+    assert_same( false, WPI_Utils::response_contains_text( '<h1>Error</h1>', 'Review' ) );
+    assert_same( true, WPI_Utils::response_contains_text( '<h1>Anything</h1>', '' ) );
+} );
+
+test_case( 'backup checksum detects same-size changes and rejects re-verification', static function (): void {
+    $output = array(); $code = 0;
+    exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/backup-integrity.php' ), $output, $code );
+    assert_same( 0, $code );
+    assert_same( array( 'intact' => true, 'changed' => false, 'reverify' => 'wpi_backup_changed' ), json_decode( implode( '', $output ), true ) );
+} );
+
+foreach ( array( 'scan-absent' => 'observing', 'scan-present' => 'open', 'failed-probe' => 'open' ) as $scenario => $expected ) {
+    test_case( 'incident recheck: ' . $scenario, static function () use ( $scenario, $expected ): void {
+        $output = array(); $code = 0;
+        exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/incident-actions.php' ) . ' ' . escapeshellarg( $scenario ), $output, $code );
+        assert_same( 0, $code );
+        assert_same( $expected, implode( '', $output ) );
+    } );
+}
+
 $failures = 0;
 foreach ( $tests as $test ) {
     list( $name, $callback ) = $test;

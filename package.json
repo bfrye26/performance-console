@@ -1,0 +1,11 @@
+{
+  "name": "wp-performance-inspector",
+  "private": true,
+  "scripts": {
+    "build:rum": "node scripts/build-rum.mjs",
+    "test": "node --test tests/rum.test.cjs"
+  },
+  "devDependencies": {
+    "web-vitals": "6.2.1"
+  }
+}

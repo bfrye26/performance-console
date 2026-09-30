@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_DB {
-    const DB_VERSION = '2.0.1';
+    const DB_VERSION = '2.2.0';
 
     public static function activate() {
         self::install();
@@ -170,6 +170,7 @@ final class WPI_DB {
             id bigint unsigned NOT NULL AUTO_INCREMENT,
             bucket datetime NOT NULL,
             metric varchar(80) NOT NULL,
+            metric_version smallint unsigned NOT NULL DEFAULT 1,
             route_hash char(32) NOT NULL DEFAULT '',
             route_group varchar(80) NOT NULL DEFAULT '',
             samples bigint unsigned NOT NULL DEFAULT 0,

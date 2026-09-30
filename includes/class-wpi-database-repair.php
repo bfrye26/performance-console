@@ -127,7 +127,7 @@ final class WPI_Database_Repair {
         }
 
         $observed_days = ! empty( $options['usage_started_at'] ) ? ( time() - (int) $options['usage_started_at'] ) / DAY_IN_SECONDS : 0;
-        if ( $observed_days >= 7 ) {
+        if ( WPI_Utils::autoload_review_ready( (array) ( $options['usage_coverage'] ?? array() ), $observed_days ) ) {
             foreach ( array_slice( (array) ( $options['largest_autoload'] ?? array() ), 0, 30 ) as $row ) {
                 $name = (string) ( $row['option_name'] ?? '' );
                 if ( (int) ( $row['bytes'] ?? 0 ) < 128 * KB_IN_BYTES || ! empty( $row['last_seen'] ) || self::protected_option( $name ) ) { continue; }
@@ -138,7 +138,7 @@ final class WPI_Database_Repair {
                     'safety'    => 'review',
                     'available' => true,
                     'detail'    => size_format( (int) $row['bytes'] ) . ' and not observed through get_option() during the sampling window.',
-                    'reason'    => 'Changes only the autoload flag. The option value is retained and the change is logged for rollback/reference.',
+                    'reason'    => 'Sample coverage includes at least 100 requests, including 20 frontend and 20 admin requests. This is not proof of disuse: verify rare saves, checkout, cron and indirect option reads. Changes only the autoload flag; the value is retained and the change is logged.',
                     'args'      => array( 'option' => $name ),
                 );
             }

@@ -4,7 +4,7 @@ Tags: performance, database, query, profiler, diagnostics, slow queries
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.1.1
+Stable tag: 2.2.0
 License: GPLv2 or later
 
 Production-oriented WordPress diagnostics and remediation with database integrity/schema checks, slow-query attribution, plugin fault analysis, cron/cache/server inspection, RUM and production safety gates.
@@ -29,6 +29,16 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 6. Create and verify a WPI database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
 
 == Changelog ==
+
+= 2.2.0 =
+* Rechecks no longer resolve incidents when scans skip checks, probes fail, or a matching successful save has not been demonstrated.
+* Uses one sampling decision and disables leftover MU tracing when the regular plugin is inactive.
+* Shares the tested save request matcher with the early bootstrap and records write/response outcomes.
+* Bundles web-vitals 6.2.1 locally, separates metric generations, and labels the RUM reporting window and bucket estimates.
+* Adds optional content assertions to plugin impact tests, sampling coverage gates to autoload reviews, and clearer evidence/measurement limits.
+* Detects same-size backup modifications before repair authorization and distinguishes integrity checks from restore testing.
+* Avoids treating future scheduled jobs or missing persistent caching as proven performance faults.
+* Adds PHP/JavaScript regression tests and CI.
 
 = 2.1.1 =
 * Redesigned the Slow Save Profiler capture panel with explicit manual and autosave choices, a clearer three-step workflow, and stronger visual hierarchy.

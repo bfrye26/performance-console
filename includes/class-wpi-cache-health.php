@@ -74,13 +74,13 @@ final class WPI_Cache_Health {
 
     public static function generate_issues( array $cache ) {
         if ( ! $cache['persistent'] ) {
-            WPI_Utils::issue( 'cache', 'high', 'No persistent object cache is active', 'WordPress reports that an external persistent object cache is not in use.', 'Repeated database/object reconstruction on dynamic requests', 'For a large production site, evaluate Redis or Memcached and verify the cache actually persists across requests.' );
+            WPI_Utils::issue( 'cache', 'info', 'No persistent object cache is active', 'WordPress reports that an external persistent object cache is not in use. This is an opportunity to evaluate, not evidence of a fault or slowdown.', 'Benefit depends on dynamic traffic and database work', 'Use representative dynamic-request measurements to decide whether Redis or Memcached is worthwhile. A lightly used, page-cached site may not benefit.' );
         }
         if ( $cache['dropin'] && ! $cache['persistent'] ) {
             WPI_Utils::issue( 'cache', 'critical', 'object-cache.php exists but WordPress is not using an external object cache', 'A cache drop-in is installed but wp_using_ext_object_cache() is false.', 'Possible broken or disabled cache integration', 'Inspect the object-cache.php provider configuration and connection errors. A broken drop-in can add latency without providing persistence.' );
         }
         if ( $cache['persistent'] && empty( $cache['roundtrip']['ok'] ) ) {
-            WPI_Utils::issue( 'cache', 'critical', 'Persistent object cache failed a set/get round-trip', 'The diagnostic cache key could not be read back correctly.', 'Object cache may be unreliable', 'Check Redis/Memcached connectivity, authentication, database selection, eviction policy and the object-cache drop-in logs.' );
+            WPI_Utils::issue( 'cache', 'critical', 'Persistent object cache failed a set/get round-trip', 'The diagnostic key could not be read back in the same request. This test does not verify persistence between requests.', 'Object cache may be unreliable', 'Check Redis/Memcached connectivity, authentication, database selection, eviction policy and the object-cache drop-in logs.' );
         }
         if ( ! empty( $cache['roundtrip']['ok'] ) && $cache['roundtrip']['get_ms'] > 10 ) {
             WPI_Utils::issue( 'cache', 'high', 'Object cache round-trip is slow', 'A single cache GET took approximately ' . esc_html( $cache['roundtrip']['get_ms'] ) . ' ms from PHP.', $cache['roundtrip']['get_ms'] . ' ms GET', 'Check network distance, Redis/Memcached CPU saturation, TLS/proxy overhead and connection reuse.' );

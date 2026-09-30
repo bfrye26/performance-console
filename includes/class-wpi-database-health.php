@@ -1013,6 +1013,7 @@ final class WPI_Database_Health {
             'transient_rows' => $transients,
             'transient_rows_capped' => $transients_capped,
             'usage_started_at' => (int) get_option( 'wpi_usage_started_at', 0 ),
+            'usage_coverage' => WPI_Utils::autoload_usage_coverage(),
         );
     }
 
@@ -1184,7 +1185,7 @@ final class WPI_Database_Health {
             WPI_Utils::issue( 'database', 'warning', 'Autoloaded options are elevated', 'Autoloaded option data is ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . '.', size_format( $opt['autoload_bytes'] ), 'Review the largest autoloaded options and remove stale plugin data.' );
         }
         $observed_days = ! empty( $opt['usage_started_at'] ) ? ( time() - (int) $opt['usage_started_at'] ) / DAY_IN_SECONDS : 0;
-        if ( $observed_days >= 7 ) {
+        if ( WPI_Utils::autoload_review_ready( (array) ( $opt['usage_coverage'] ?? array() ), $observed_days ) ) {
             foreach ( array_slice( $opt['largest_autoload'], 0, 30 ) as $row ) {
                 if ( (int) $row['bytes'] < 128 * KB_IN_BYTES || ! empty( $row['last_seen'] ) ) { continue; }
                 WPI_Utils::issue( 'database', 'warning', 'Large autoloaded option has not been observed in sampled requests', '<code>' . esc_html( $row['option_name'] ) . '</code> is ' . esc_html( size_format( (int) $row['bytes'] ) ) . ' and has not been observed through get_option() during approximately ' . intval( $observed_days ) . ' days of sampling.', size_format( (int) $row['bytes'] ), 'Verify the option is not read indirectly or required during unsampled/rare workflows. If confirmed, switch it to non-autoloaded and compare memory/request time before and after.' );

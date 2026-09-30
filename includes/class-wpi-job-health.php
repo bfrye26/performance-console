@@ -124,11 +124,9 @@ final class WPI_Job_Health {
 
         $as = $health['action_scheduler'];
         if ( empty( $as['available'] ) ) { return; }
-        $pending = isset( $as['pending'] ) ? (int) $as['pending'] : (int) ( $as['sample_pending'] ?? 0 );
         $failed = isset( $as['failed'] ) ? (int) $as['failed'] : (int) ( $as['sample_failed'] ?? 0 );
-        if ( $pending > 5000 ) {
-            WPI_Utils::issue( 'jobs', $pending > 25000 ? 'critical' : 'high', 'Action Scheduler backlog is very large', 'There are ' . ( ! empty( $as['bounded'] ) && $pending >= 10001 ? 'at least ' : '' ) . number_format_i18n( $pending ) . ' pending actions.', number_format_i18n( $pending ) . '+ pending', 'Identify the dominant pending hooks, confirm runners are executing, and check whether jobs are slower than the rate at which they are created.' );
-        }
+        // Future scheduled work is not a backlog. Only the due/failed checks below
+        // establish an actionable queue problem; bounded scans may not know due counts.
         if ( isset( $as['past_due'] ) && $as['past_due'] > 1000 ) {
             WPI_Utils::issue( 'jobs', 'high', 'Action Scheduler has many past-due actions', number_format_i18n( $as['past_due'] ) . ' pending actions are already past due.', number_format_i18n( $as['past_due'] ) . ' past due', 'Check queue runner concurrency, cron health, failed hooks and long-running jobs.' );
         }

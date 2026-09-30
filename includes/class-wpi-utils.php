@@ -4,6 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 final class WPI_Utils {
     private static $issue_source = 'passive';
     private static $issue_run_id = 0;
+    private static $collected_incidents = array();
 
     public static function table( $suffix ) {
         global $wpdb;
@@ -65,6 +66,35 @@ final class WPI_Utils {
     public static function begin_issue_collection( $source, $run_id = 0 ) {
         self::$issue_source = in_array( $source, array( 'scan', 'passive', 'manual' ), true ) ? $source : 'passive';
         self::$issue_run_id = absint( $run_id );
+        self::$collected_incidents = array();
+    }
+
+    public static function collected_incidents() { return array_keys( self::$collected_incidents ); }
+
+    public static function autoload_usage_coverage() {
+        global $wpdb;
+        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT route FROM ' . self::table( 'runs' ) . ' WHERE mode=%s AND created_at >= %s ORDER BY id DESC LIMIT 5000', 'sample', gmdate( 'Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS ) ), ARRAY_A );
+        $coverage = array( 'total' => 0, 'frontend' => 0, 'admin' => 0 );
+        foreach ( (array) $rows as $row ) {
+            $coverage['total']++;
+            $route = (string) $row['route'];
+            if ( 0 === strpos( $route, 'admin:' ) ) { $coverage['admin']++; }
+            elseif ( preg_match( '/^(front-page|posts-home|search|404|singular:|taxonomy:|archive:|frontend:)/', $route ) ) { $coverage['frontend']++; }
+        }
+        return $coverage;
+    }
+
+    public static function autoload_review_ready( array $coverage, $days ) {
+        // A conservative review threshold, never proof that an option is unused.
+        return $days >= 7 && (int) ( $coverage['total'] ?? 0 ) >= 100
+            && (int) ( $coverage['frontend'] ?? 0 ) >= 20 && (int) ( $coverage['admin'] ?? 0 ) >= 20;
+    }
+
+    public static function response_contains_text( $html, $expected ) {
+        $text = html_entity_decode( wp_strip_all_tags( (string) $html ), ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+        $text = preg_replace( '/\s+/u', ' ', $text );
+        $expected = trim( preg_replace( '/\s+/u', ' ', (string) $expected ) );
+        return '' === $expected || false !== strpos( $text, $expected );
     }
 
     public static function end_issue_collection() { self::$issue_source = 'passive'; self::$issue_run_id = 0; }
@@ -74,6 +104,7 @@ final class WPI_Utils {
         $table = self::table( 'issues' );
         $key = md5( implode( '|', array( $area, $title, $route ) ) );
         $incident_key = self::incident_key( $area, $title, $message, $context );
+        self::$collected_incidents[ $incident_key ] = true;
         $now = self::now_mysql();
         $data = array(
             'issue_key'       => $key,
@@ -308,7 +339,7 @@ final class WPI_Utils {
         $rest_path = '/' . ltrim( rawurldecode( $rest_path ), '/' );
         if ( preg_match( '#^/(wp/v2|wc/v3)/([a-z0-9_-]+)(?:/(\d+))?(?:/(autosaves))?/?$#i', $rest_path, $matches ) ) {
             $resource = sanitize_key( $matches[2] );
-            if ( in_array( $resource, array( 'media', 'comments', 'users', 'settings', 'search', 'types', 'statuses', 'taxonomies' ), true ) ) { return false; }
+            if ( in_array( $resource, array( 'media', 'comments', 'users', 'settings', 'search', 'types', 'statuses', 'taxonomies', 'categories', 'tags' ), true ) ) { return false; }
             $autosave = ! empty( $matches[4] );
             return array(
                 'kind' => $autosave ? 'block-editor-autosave' : ( 'wc/v3' === strtolower( $matches[1] ) ? 'woocommerce-rest' : 'block-editor-rest' ),

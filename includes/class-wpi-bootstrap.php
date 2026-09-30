@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_Bootstrap {
-    const VERSION = '1.3.0';
+    const VERSION = '1.3.1';
     const SAVE_COOKIE = 'wpi_capture_save';
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-wp-performance-inspector-bootstrap.php'; }

@@ -1,4 +1,26 @@
-# WP Performance Inspector 2.1.1
+# WP Performance Inspector 2.2.0
+
+## 2.2.0 measurement and verification safeguards
+
+- Failed or incomplete rechecks stay open; a successful non-reproducing check moves to observing, not automatically resolved. Safe scans no longer bulk-resolve older deep findings.
+- Save rechecks compare the same post, post type, editor, capture kind and user, require a matching WordPress write and successful HTTP response, and keep single-run improvement under observation.
+- The early MU bootstrap uses the same tested save matcher as the plugin. Nested block-renderer routes, taxonomy endpoints and unrelated requests no longer match as content saves.
+- The MU bootstrap respects plugin activation (including network activation). Declined sampling is not retried by the late profiler.
+- RUM uses a pinned, self-hosted [web-vitals 6.2.1](https://github.com/GoogleChrome/web-vitals) build. Version 2 aggregates are separate from legacy measurements; no historical records are deleted. The dashboard displays only version 2 aggregates.
+- RUM reports once at the first backgrounding of each sampled visit, with a fresh sample after bfcache restoration. Later interactions on a resumed tab are not included. Values are not a complete page-lifetime/CrUX equivalent. Token refresh and declined-beacon fallback reduce avoidable data loss.
+- Plugin impact tests optionally require a visible page phrase in every measured response. This is a content-presence assertion, not proof that JavaScript, forms, checkout or all plugin behavior still works.
+- Autoload review suggestions require at least seven days since observation started and 100 recent samples, including 20 frontend and 20 admin samples. Absence is still not proof of disuse; rare workflows need manual checks.
+- Database timing includes all retained query timings, while detailed attribution remains bounded and reports saturation. Nested hook times overlap and are not additive callback costs.
+- Repair authorization rehashes the selected backup. Re-verification cannot silently replace a changed file's checksum. Dashboard candidate listing does not reread entire exports. Integrity checking is not restore testing or snapshot consistency.
+- Scheduled future jobs are not classified as overdue backlog. Missing persistent object caching is an evaluation opportunity rather than a proven fault.
+
+### Development checks
+
+Run `php tests/run.php` for PHP regression tests. Run `npm ci --ignore-scripts`, `npm run build:rum`, then `npm test` for the pinned vendor artifact and JavaScript transport tests. WordPress does not require Node or npm at runtime. Ship `assets/vendor/web-vitals/`, including its Apache-2.0 license, with the plugin.
+
+After installing this update, open the WPI admin page to refresh its MU bootstrap and purge cached HTML through your existing page-cache/CDN controls so visitors receive the new script dependency. The RUM panel starts with version-2 data only. On Windows, `scripts/build-release.ps1` builds a runtime-only ZIP and refuses to overwrite an existing archive.
+
+See [IMPROVEMENT-PLAN.md](IMPROVEMENT-PLAN.md) for the remaining work toward wider compatibility and guided remediation. This release is the trust-and-measurement foundation, not a universal automatic optimizer.
 
 ## 2.1.1 capture workflow polish
 

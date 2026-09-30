@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Performance Inspector
  * Description: Production-oriented WordPress performance diagnostics, database/plugin fault detection, slow-query attribution, server/cache/job checks, RUM and safe remediation.
- * Version:     2.1.1
+ * Version:     2.2.0
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * Author:      CGMagazine
@@ -12,7 +12,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'WPI_VERSION', '2.1.1' );
+define( 'WPI_VERSION', '2.2.0' );
 define( 'WPI_FILE', __FILE__ );
 define( 'WPI_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WPI_URL', plugin_dir_url( __FILE__ ) );

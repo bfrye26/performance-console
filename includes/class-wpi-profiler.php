@@ -9,6 +9,7 @@ final class WPI_Profiler {
     private static $hook_starts = array();
     private static $hook_totals = array();
     private static $option_hits = array();
+    private static $saved_posts = array();
 
     public static function init() {
         global $wpdb;
@@ -18,7 +19,7 @@ final class WPI_Profiler {
         self::$sample = $deep || $early_sample;
 
         // Fallback if the MU bootstrap is not installed yet. This misses early plugin-load SQL but still provides useful request data.
-        if ( ! self::$sample ) {
+        if ( ! self::$sample && ! defined( 'WPI_SAMPLING_DECIDED' ) ) {
             $runtime = get_option( 'wpi_runtime', array( 'sample_rate' => 0.0002 ) );
             $rate = max( 0, min( 1, (float) ( $runtime['sample_rate'] ?? 0.0002 ) ) );
             self::$sample = $rate > 0 && mt_rand() / mt_getrandmax() <= $rate;
@@ -50,6 +51,7 @@ final class WPI_Profiler {
             add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
         }
         if ( defined( 'WPI_SAVE_DIAGNOSTIC' ) && WPI_SAVE_DIAGNOSTIC ) {
+            add_action( 'wp_after_insert_post', array( __CLASS__, 'record_saved_post' ), PHP_INT_MAX, 2 );
             foreach ( array( 'save_post','wp_insert_post','wp_after_insert_post','post_updated','transition_post_status','added_post_meta','updated_post_meta','deleted_post_meta' ) as $hook ) {
                 add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
                 add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
@@ -60,6 +62,26 @@ final class WPI_Profiler {
             }
             add_action( 'init', array( __CLASS__, 'register_dynamic_save_timers' ), PHP_INT_MAX - 1 );
         }
+    }
+
+    public static function record_saved_post( $post_id, $post ) {
+        $parent = wp_is_post_revision( $post_id );
+        $id = $parent ? (int) $parent : (int) $post_id;
+        self::$saved_posts[ $id ] = $parent ? (string) get_post_type( $id ) : (string) $post->post_type;
+    }
+
+    public static function save_outcome( array $context, array $saved_posts, $status, $fatal = false ) {
+        $id = absint( $context['post_id'] ?? 0 );
+        $written = $id > 0 && isset( $saved_posts[ $id ] );
+        return array( 'write_observed' => $written, 'response_status' => (int) $status,
+            'successful' => $written && ! $fatal && $status >= 200 && $status < 400 );
+    }
+
+    public static function comparable_save( array $before, array $after ) {
+        foreach ( array( 'post_id', 'post_type', 'requested_kind', 'kind', 'user_id' ) as $key ) {
+            if ( empty( $before[ $key ] ) || (string) $before[ $key ] !== (string) ( $after[ $key ] ?? '' ) ) { return false; }
+        }
+        return true;
     }
 
     public static function hook_start() {
@@ -150,11 +172,11 @@ final class WPI_Profiler {
         $trace_map = self::trace_map();
 
         if ( isset( $wpdb->queries ) && is_array( $wpdb->queries ) ) {
-            foreach ( array_slice( $wpdb->queries, 0, 7500 ) as $q ) {
+            foreach ( $wpdb->queries as $query_index => $q ) {
                 $sql = (string) ( $q[0] ?? '' );
                 $sec = (float) ( $q[1] ?? 0 );
                 $db_ms += $sec * 1000;
-                if ( ! $deep ) { continue; }
+                if ( ! $deep || $query_index >= 7500 ) { continue; }
                 $norm = WPI_Utils::normalize_sql( $sql );
                 $rawhash = md5( $sql );
                 $trace = array();
@@ -180,9 +202,15 @@ final class WPI_Profiler {
         $run_payload['database_errors'] = self::database_errors( (array) $EZSQL_ERROR, $trace_map );
         $run_payload['included_files'] = count( get_included_files() );
         $run_payload['query_timing_available'] = defined( 'SAVEQUERIES' ) && SAVEQUERIES;
+        $run_payload['measurement_scope'] = isset( $GLOBALS['wpi_diag_start'] ) ? 'mu-bootstrap-to-shutdown' : 'plugins-loaded-to-shutdown';
+        $run_payload['query_details_truncated'] = count( (array) ( $wpdb->queries ?? array() ) ) > 7500;
+        $run_payload['query_traces_at_limit'] = count( (array) ( $GLOBALS['wpi_query_traces'] ?? array() ) ) >= 5000;
         $run_payload['probe_id'] = sanitize_text_field( (string) ( $GLOBALS['wpi_probe_id'] ?? '' ) );
         $run_payload['excluded_plugin'] = sanitize_text_field( (string) ( $GLOBALS['wpi_excluded_plugin'] ?? '' ) );
         if ( $save ) {
+            $last_error = error_get_last();
+            $fatal = $last_error && in_array( $last_error['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ), true );
+            $run_payload['save_outcome'] = self::save_outcome( $save_context, self::$saved_posts, http_response_code() ?: 200, $fatal );
             $run_payload['save_context'] = array(
                 'kind' => sanitize_key( (string) ( $save_context['kind'] ?? '' ) ),
                 'requested_kind' => sanitize_key( (string) ( $save_context['requested_kind'] ?? '' ) ),
@@ -209,9 +237,13 @@ final class WPI_Profiler {
         if ( $deep ) { self::persist_queries( $run_id, $queries_by_pattern, $route ); }
         self::request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, $run_payload );
         if ( $save ) {
-            $verification_key = get_transient( 'wpi_save_verify_' . sanitize_key( (string) ( $save_context['capture_id'] ?? '' ) ) );
-            if ( $verification_key ) {
-                WPI_Utils::set_incident_status( $verification_key, 'resolved' );
+            $verification = get_transient( 'wpi_save_verify_' . sanitize_key( (string) ( $save_context['capture_id'] ?? '' ) ) );
+            if ( $verification ) {
+                $matched = is_array( $verification ) && self::comparable_save( (array) ( $verification['context'] ?? array() ), $run_payload['save_context'] );
+                $improved = $matched && ! empty( $run_payload['save_outcome']['successful'] ) && $php_ms < 750;
+                $verification_key = is_array( $verification ) ? (string) ( $verification['key'] ?? '' ) : (string) $verification;
+                WPI_Utils::set_incident_status( $verification_key, $improved ? 'observing' : 'open' );
+                set_transient( 'wpi_save_capture_notice_' . get_current_user_id(), array( 'ok' => $improved, 'message' => $improved ? 'A matching successful save was below the slow-save threshold. The incident is observing, not resolved; repeat representative saves before marking it resolved.' : 'Recheck inconclusive or still slow. The incident remains open: use the same content and save type, and confirm the editor reports success.' ), 10 * MINUTE_IN_SECONDS );
                 delete_transient( 'wpi_save_verify_' . sanitize_key( (string) $save_context['capture_id'] ) );
             }
             self::save_issue( $route, $php_ms, $db_ms, $http_ms, $run_payload );
@@ -506,7 +538,7 @@ final class WPI_Profiler {
     }
 
     private static function save_issue( $route, $php_ms, $db_ms, $http_ms, array $payload ) {
-        if ( $php_ms < 750 ) { return; }
+        if ( $php_ms < 750 || empty( $payload['save_outcome']['successful'] ) ) { return; }
         $components = (array) ( $payload['save_components'] ?? array() );
         $dominant = (array) ( $components[0] ?? array() );
         $component = sanitize_text_field( (string) ( $dominant['component'] ?? '' ) );

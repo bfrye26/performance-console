@@ -4,7 +4,6 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 final class WPI_Scanner {
     public static function scan( $deep = false, $force_large = false ) {
         WPI_Utils::begin_issue_collection( 'scan' );
-        WPI_Utils::resolve_areas( array( 'database','server','wordpress','filesystem','plugin','errors','hooks','cache','cron','jobs','frontend','regression' ) );
 
         $system = WPI_System_Health::inspect( $deep );
         $database_health = WPI_Database_Health::inspect( $deep, $force_large );
@@ -19,11 +18,14 @@ final class WPI_Scanner {
         WPI_Cache_Health::generate_issues( $cache );
         WPI_Frontend_Health::generate_issues( $frontend );
         WPI_Regression::generate_issues( $regression );
+        $observed_incidents = WPI_Utils::collected_incidents();
         WPI_Utils::end_issue_collection();
 
         $database = self::database_compat( $database_health );
         $result = array(
             'scan_version' => WPI_VERSION,
+            // Absence is not a pass: inspectors can skip checks or lack capabilities.
+            'observed_incidents' => $observed_incidents,
             'mode' => $deep ? 'deep' : 'production-safe',
             'generated_at' => WPI_Utils::now_mysql(),
             'system' => $system,

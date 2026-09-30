@@ -281,6 +281,9 @@ final class WPI_Database_Backup {
         if ( (int) ( $backup['tables_done'] ?? 0 ) !== (int) ( $backup['table_count'] ?? 0 ) ) { return new WP_Error( 'wpi_backup_tables_incomplete', 'Not every table in the backup manifest was completed.' ); }
         $hash = @hash_file( 'sha256', $path );
         if ( ! is_string( $hash ) || 64 !== strlen( $hash ) ) { return new WP_Error( 'wpi_backup_hash', 'The backup file could not be checksummed.' ); }
+        if ( 'verified' === $backup['status'] && ! hash_equals( (string) $backup['sha256'], $hash ) ) {
+            return new WP_Error( 'wpi_backup_changed', 'The export changed after its integrity check. Create a new export; the previous checksum will not be replaced.' );
+        }
         $now = WPI_Utils::now_mysql();
         $wpdb->update(
             self::table_name(),
@@ -290,14 +293,19 @@ final class WPI_Database_Backup {
         return self::get( $id );
     }
 
-    public static function is_verified_recent( $id, $max_age = self::VERIFIED_MAX_AGE ) {
+    public static function is_verified_recent( $id, $max_age = self::VERIFIED_MAX_AGE, $check_integrity = true ) {
         $backup = self::get( $id );
         if ( is_wp_error( $backup ) || 'verified' !== (string) $backup['status'] || empty( $backup['verified_at'] ) || empty( $backup['sha256'] ) ) { return false; }
         $verified = strtotime( (string) $backup['verified_at'] . ' UTC' );
         if ( ! $verified || time() - $verified > max( 300, (int) $max_age ) ) { return false; }
         $path = self::validated_path( $backup );
         if ( is_wp_error( $path ) ) { return false; }
-        return (int) @filesize( $path ) === (int) $backup['size_bytes'];
+        clearstatcache( true, $path );
+        if ( (int) @filesize( $path ) !== (int) $backup['size_bytes'] ) { return false; }
+        // Listing candidates is cheap; repair authorization always rehashes the chosen export.
+        if ( ! $check_integrity ) { return true; }
+        $hash = @hash_file( 'sha256', $path );
+        return is_string( $hash ) && hash_equals( (string) $backup['sha256'], $hash );
     }
 
     public static function get( $id ) {

@@ -1,54 +1,71 @@
 (function () {
     'use strict';
-    if (!window.performance || !window.wpiRum || Math.random() > Number(wpiRum.rate || 0)) { return; }
+    if (!window.performance || !window.wpiRum || !window.webVitals || Math.random() >= Number(wpiRum.rate || 0)) { return; }
 
-    var metrics = { route_group: wpiRum.route_group || 'frontend:other' };
+    var metrics = {};
     var token = null;
     var sent = false;
-    var interactions = {};
+    var pending = false;
+    var wantsSend = false;
+    var generation = 0;
 
-    fetch(wpiRum.tokenEndpoint + '?route_group=' + encodeURIComponent(metrics.route_group), {
-        credentials: 'omit', cache: 'no-store', headers: { 'Accept': 'application/json' }
-    }).then(function (response) {
-        if (!response.ok) { throw new Error('RUM token unavailable'); }
-        return response.json();
-    }).then(function (data) { token = data; }).catch(function () {});
-
-    try {
-        var navigation = performance.getEntriesByType('navigation')[0];
-        if (navigation) { metrics.ttfb = Math.max(0, navigation.responseStart - navigation.requestStart); }
-    } catch (error) {}
-
-    function observe(type, callback, options) {
-        try {
-            if (!window.PerformanceObserver || (PerformanceObserver.supportedEntryTypes || []).indexOf(type) === -1) { return; }
-            var observer = new PerformanceObserver(function (list) { list.getEntries().forEach(callback); });
-            observer.observe(options || { type: type, buffered: true });
-        } catch (error) {}
+    function getToken() {
+        if (pending || sent) { return; }
+        pending = true;
+        var startedGeneration = generation;
+        fetch(wpiRum.tokenEndpoint + '?route_group=' + encodeURIComponent(wpiRum.route_group), {
+            credentials: 'omit', cache: 'no-store', keepalive: true, headers: { 'Accept': 'application/json' }
+        }).then(function (response) {
+            if (!response.ok) { throw new Error('RUM token unavailable'); }
+            return response.json();
+        }).then(function (data) {
+            if (startedGeneration !== generation) { return; }
+            pending = false;
+            token = data;
+            if (wantsSend) { send(); }
+        }).catch(function () { if (startedGeneration === generation) { pending = false; } });
     }
 
-    observe('paint', function (entry) { if (entry.name === 'first-contentful-paint') { metrics.fcp = entry.startTime; } });
-    observe('largest-contentful-paint', function (entry) { metrics.lcp = entry.startTime; });
-    observe('layout-shift', function (entry) { if (!entry.hadRecentInput) { metrics.cls = (metrics.cls || 0) + entry.value; } });
-    observe('event', function (entry) {
-        if (!entry.interactionId) { return; }
-        interactions[entry.interactionId] = (interactions[entry.interactionId] || 0) + (entry.duration || 0);
-        metrics.inp = Math.max.apply(Math, Object.keys(interactions).map(function (key) { return interactions[key]; }));
-    }, { type: 'event', buffered: true, durationThreshold: 40 });
+    function collect(metric) {
+        var name = metric.name.toLowerCase();
+        if (['ttfb', 'fcp', 'lcp', 'cls', 'inp'].indexOf(name) !== -1 && Number.isFinite(metric.value)) {
+            metrics[name] = metric.value;
+        }
+    }
+
+    // Keep the vendor's lifecycle, interaction and session-window algorithms intact.
+    ['onTTFB', 'onFCP', 'onLCP', 'onCLS', 'onINP'].forEach(function (name) {
+        webVitals[name](collect, { reportAllChanges: true });
+    });
 
     function send() {
-        if (sent || !token) { return; }
-        sent = true;
+        if (sent || !Object.keys(metrics).length) { return; }
+        wantsSend = true;
+        if (!token || Number(token.expires) * 1000 <= Date.now()) { getToken(); return; }
         try {
-            var body = JSON.stringify(Object.assign({}, metrics, token));
-            if (navigator.sendBeacon) {
-                navigator.sendBeacon(wpiRum.endpoint, new Blob([body], { type: 'application/json' }));
-            } else {
+            var body = JSON.stringify(Object.assign({}, token, metrics, { metric_version: 2 }));
+            var queued = navigator.sendBeacon && navigator.sendBeacon(wpiRum.endpoint, new Blob([body], { type: 'application/json' }));
+            if (!queued) {
                 fetch(wpiRum.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true, credentials: 'omit' }).catch(function () {});
             }
+            sent = true;
         } catch (error) {}
     }
 
-    addEventListener('pagehide', send, { once: true });
-    addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { send(); } });
+    getToken();
+    setInterval(function () {
+        if (!sent && document.visibilityState === 'visible') { getToken(); }
+    }, 8 * 60 * 1000);
+    // Batch after the vendor's synchronous hidden-event handlers flush observers.
+    addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') { Promise.resolve().then(send); }
+        else if (!sent && (!token || Number(token.expires) * 1000 <= Date.now())) { getToken(); }
+    });
+    addEventListener('pagehide', function () { Promise.resolve().then(send); });
+    addEventListener('pageshow', function (event) {
+        if (!event.persisted) { return; }
+        generation++;
+        metrics = {}; token = null; sent = false; pending = false; wantsSend = false;
+        getToken();
+    });
 }());
