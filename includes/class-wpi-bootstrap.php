@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_Bootstrap {
-    const VERSION = '1.3.1';
+    const VERSION = '1.3.2';
     const SAVE_COOKIE = 'wpi_capture_save';
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-wp-performance-inspector-bootstrap.php'; }
@@ -28,11 +28,16 @@ final class WPI_Bootstrap {
         if ( ! wp_mkdir_p( WPMU_PLUGIN_DIR ) ) { return new WP_Error( 'wpi_mu_dir', 'Unable to create mu-plugins directory.' ); }
         $template = self::rendered_template();
         if ( false === $template ) { return new WP_Error( 'wpi_mu_template', 'MU bootstrap template missing.' ); }
-        $ok = @file_put_contents( self::path(), $template, LOCK_EX ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-        if ( false === $ok ) { return new WP_Error( 'wpi_mu_write', 'Unable to write MU bootstrap.' ); }
-        @chmod( self::path(), 0644 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
+        $target = self::path();
+        $staging = $target . '.tmp';
+        $ok = @file_put_contents( $staging, $template, LOCK_EX ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+        if ( false === $ok || ! @rename( $staging, $target ) ) { // phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename
+            @unlink( $staging ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+            return new WP_Error( 'wpi_mu_write', 'Unable to write MU bootstrap.' );
+        }
+        @chmod( $target, 0644 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
         $legacy = self::legacy_path();
-        if ( $legacy !== self::path() && file_exists( $legacy ) ) { @unlink( $legacy ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+        if ( $legacy !== $target && file_exists( $legacy ) ) { @unlink( $legacy ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
         set_transient( 'wpi_bootstrap_checked', self::VERSION, DAY_IN_SECONDS );
         return true;
     }

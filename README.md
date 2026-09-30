@@ -1,4 +1,12 @@
-# WP Performance Inspector 2.2.0
+# WP Performance Inspector 2.2.1
+
+## 2.2.1 responsive and lifecycle fixes
+
+- The admin suite no longer produces a horizontal scrollbar: the full-bleed background keeps its left bleed without extending past the viewport on the right.
+- Uninstall now removes every plugin data store: the seven custom tables, `wpi_*` options and transients, the maintenance cron event, the generated MU bootstrap, and plugin-created backup files/directories.
+- Per-request overhead removed: the MU sampler reads `wpi_secret` only when a signed diagnostic or save-capture request needs it, and `wpi_db_version` is autoloaded for existing sites on upgrade.
+- The MU bootstrap install is atomic (staging file + rename) so an interrupted write can never leave a truncated file in mu-plugins.
+- The REST autoload endpoint now uses the Repair Centre's protected-option list, closing the divergence where `blogname`, `admin_email`, roles and widget options were changeable through REST only.
 
 ## 2.2.0 measurement and verification safeguards
 

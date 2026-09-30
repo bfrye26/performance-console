@@ -1,6 +1,6 @@
 <?php
 /** WP Performance Inspector early diagnostic/bootstrap sampler.
- * WPI Bootstrap Version: 1.3.1
+ * WPI Bootstrap Version: 1.3.2
  */
 if ( ! defined( 'ABSPATH' ) ) { return; }
 
@@ -14,10 +14,11 @@ $wpi_signed_diag = false;
 $wpi_exclude = '';
 $wpi_probe_id = '';
 $wpi_save_capture = array();
-$wpi_secret = (string) get_option( 'wpi_secret', '' );
+$wpi_secret = '';
 $wpi_diag = isset( $_GET['wpi_diag'], $_GET['wpi_ts'], $_GET['wpi_sig'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 if ( $wpi_diag ) {
+    $wpi_secret = (string) get_option( 'wpi_secret', '' );
     $wpi_ts = absint( $_GET['wpi_ts'] ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
     $wpi_sig = sanitize_text_field( wp_unslash( $_GET['wpi_sig'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
     $wpi_exclude = isset( $_GET['wpi_exclude'] ) ? sanitize_text_field( wp_unslash( $_GET['wpi_exclude'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
@@ -29,9 +30,10 @@ if ( $wpi_diag ) {
 }
 
 // A save capture observes one real editor request. It never replays or alters the write.
-if ( ! $wpi_deep && $wpi_secret && ! empty( $_COOKIE['wpi_capture_save'] ) ) {
+if ( ! $wpi_deep && ! empty( $_COOKIE['wpi_capture_save'] ) ) {
+    $wpi_secret = (string) get_option( 'wpi_secret', '' );
     $wpi_cookie = explode( '|', sanitize_text_field( wp_unslash( $_COOKIE['wpi_capture_save'] ) ) );
-    if ( 5 === count( $wpi_cookie ) ) {
+    if ( $wpi_secret && 5 === count( $wpi_cookie ) ) {
         list( $wpi_user_id, $wpi_expires, $wpi_capture_kind, $wpi_capture_id, $wpi_cookie_sig ) = $wpi_cookie;
         $wpi_cookie_data = $wpi_user_id . '|' . $wpi_expires . '|' . $wpi_capture_kind . '|' . $wpi_capture_id;
         $wpi_valid_cookie = ctype_digit( $wpi_user_id ) && ctype_digit( $wpi_expires )

@@ -17,6 +17,7 @@ function home_url( $path = '' ) { return 'http://example.test:8080' . $path; }
 require_once dirname( __DIR__ ) . '/includes/class-wpi-utils.php';
 require_once dirname( __DIR__ ) . '/includes/class-wpi-bootstrap.php';
 require_once dirname( __DIR__ ) . '/includes/class-wpi-database-health.php';
+require_once dirname( __DIR__ ) . '/includes/class-wpi-database-repair.php';
 require_once dirname( __DIR__ ) . '/includes/class-wpi-profiler.php';
 
 $tests = array();
@@ -127,10 +128,10 @@ test_case( 'save parser rejects taxonomy and nested non-save REST endpoints', st
 } );
 
 foreach ( array(
-    'inactive' => array( 'decided' => false, 'queries' => false, 'sampled' => false ),
-    'declined' => array( 'decided' => true, 'queries' => false, 'sampled' => false ),
-    'network' => array( 'decided' => true, 'queries' => false, 'sampled' => false ),
-    'sampled' => array( 'decided' => true, 'queries' => true, 'sampled' => true ),
+    'inactive' => array( 'decided' => false, 'queries' => false, 'sampled' => false, 'secret_reads' => 0 ),
+    'declined' => array( 'decided' => true, 'queries' => false, 'sampled' => false, 'secret_reads' => 0 ),
+    'network' => array( 'decided' => true, 'queries' => false, 'sampled' => false, 'secret_reads' => 0 ),
+    'sampled' => array( 'decided' => true, 'queries' => true, 'sampled' => true, 'secret_reads' => 0 ),
 ) as $scenario => $expected ) {
     test_case( 'production MU bootstrap: ' . $scenario, static function () use ( $scenario, $expected ): void {
         $output = array(); $code = 0;
@@ -139,6 +140,13 @@ foreach ( array(
         assert_same( $expected, json_decode( implode( '', $output ), true ) );
     } );
 }
+
+test_case( 'deep diagnostics load the secret on demand only', static function (): void {
+    $output = array(); $code = 0;
+    exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/bootstrap.php' ) . ' diag-secret', $output, $code );
+    assert_same( 0, $code );
+    assert_same( array( 'decided' => true, 'queries' => true, 'sampled' => false, 'secret_reads' => 1 ), json_decode( implode( '', $output ), true ) );
+} );
 
 test_case( 'autoload reviews require real frontend and admin coverage', static function (): void {
     assert_same( false, WPI_Utils::autoload_review_ready( array(), 30 ) );
@@ -169,6 +177,30 @@ foreach ( array( 'scan-absent' => 'observing', 'scan-present' => 'open', 'failed
         assert_same( $expected, implode( '', $output ) );
     } );
 }
+
+test_case( 'autoload protection is shared between REST and the repair centre', static function (): void {
+    assert_same( true, WPI_Database_Repair::protected_option( 'blogname' ) );
+    assert_same( true, WPI_Database_Repair::protected_option( 'wpi_secret' ) );
+    assert_same( true, WPI_Database_Repair::protected_option( 'widget_block' ) );
+    assert_same( false, WPI_Database_Repair::protected_option( 'woocommerce_currency' ) );
+    $rest = file_get_contents( dirname( __DIR__ ) . '/includes/class-wpi-rest.php' );
+    assert_same( true, false !== strpos( (string) $rest, 'WPI_Database_Repair::protected_option' ) );
+} );
+
+test_case( 'MU bootstrap install writes atomically', static function (): void {
+    $source = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-wpi-bootstrap.php' );
+    assert_same( false, false !== strpos( $source, 'file_put_contents( self::path()' ) );
+    assert_same( true, false !== strpos( $source, 'rename(' ) );
+} );
+
+test_case( 'uninstall removes every plugin data store', static function (): void {
+    $source = (string) file_get_contents( dirname( __DIR__ ) . '/uninstall.php' );
+    foreach ( array( 'runs', 'queries', 'issues', 'metrics', 'changes', 'option_usage', 'backups' ) as $suffix ) {
+        assert_same( true, false !== strpos( $source, "'" . $suffix . "'" ) );
+    }
+    assert_same( true, false !== strpos( $source, 'wp_clear_scheduled_hook' ) );
+    assert_same( true, false !== strpos( $source, '000-wp-performance-inspector-bootstrap.php' ) );
+} );
 
 $failures = 0;
 foreach ( $tests as $test ) {

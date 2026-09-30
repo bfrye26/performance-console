@@ -187,10 +187,10 @@ final class WPI_REST {
     }
 
     public static function autoload( WP_REST_Request $req ) {
+        self::load_diagnostics();
         $name = sanitize_text_field( $req->get_param( 'option' ) );
         $enable = (bool) $req->get_param( 'autoload' );
-        $protected = array( 'siteurl','home','active_plugins','template','stylesheet','cron','rewrite_rules','wpi_runtime','wpi_secret' );
-        if ( ! $name || in_array( $name, $protected, true ) ) { return new WP_Error( 'wpi_protected', 'This option is protected.', array( 'status' => 400 ) ); }
+        if ( '' === $name || WPI_Database_Repair::protected_option( $name ) ) { return new WP_Error( 'wpi_protected', 'This option is protected.', array( 'status' => 400 ) ); }
         global $wpdb;
         $before = $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name=%s", $name ) );
         if ( null === $before ) { return new WP_Error( 'wpi_missing', 'Option not found.', array( 'status' => 404 ) ); }

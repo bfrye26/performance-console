@@ -1477,7 +1477,7 @@ final class WPI_Database_Repair {
         return in_array( sanitize_key( $type ), array( 'postmeta','commentmeta','usermeta','termmeta','term_relationships' ), true );
     }
 
-    private static function protected_option( $name ) {
+    public static function protected_option( $name ) {
         $name = (string) $name;
         $protected = array(
             'siteurl','home','blogname','blogdescription','admin_email','users_can_register','default_role','start_of_week',

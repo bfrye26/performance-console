@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class WPI_DB {
-    const DB_VERSION = '2.2.0';
+    const DB_VERSION = '2.2.1';
 
     public static function activate() {
         self::install();
@@ -239,7 +239,15 @@ final class WPI_DB {
         }
         // Backfill stable incident identities without discarding existing evidence.
         $wpdb->query( "UPDATE {$issues} SET incident_key=issue_key WHERE incident_key=''" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        update_option( 'wpi_db_version', self::DB_VERSION, false );
+        update_option( 'wpi_db_version', self::DB_VERSION, true );
+        // The version option is read on every request; keep it in the autoloaded set.
+        if ( function_exists( 'wp_set_option_autoload' ) ) {
+            wp_set_option_autoload( 'wpi_db_version', true );
+        } else {
+            $wpdb->update( $wpdb->options, array( 'autoload' => 'yes' ), array( 'option_name' => 'wpi_db_version' ) );
+            wp_cache_delete( 'alloptions', 'options' );
+            wp_cache_delete( 'wpi_db_version', 'options' );
+        }
     }
 
     public static function cleanup() {

@@ -4,7 +4,7 @@ Tags: performance, database, query, profiler, diagnostics, slow queries
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.2.0
+Stable tag: 2.2.1
 License: GPLv2 or later
 
 Production-oriented WordPress diagnostics and remediation with database integrity/schema checks, slow-query attribution, plugin fault analysis, cron/cache/server inspection, RUM and production safety gates.
@@ -29,6 +29,13 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 6. Create and verify a WPI database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
 
 == Changelog ==
+
+= 2.2.1 =
+* Fixed a 20px horizontal overflow on every admin screen caused by the full-bleed background margins.
+* Uninstalling now removes all plugin data: tables, options/transients, the maintenance cron event, the MU bootstrap, and backup files.
+* Removed two unconditional database reads from normal requests: the MU sampler loads the secret on demand only, and the database version option is autoloaded.
+* The MU bootstrap is installed atomically (staging file plus rename), so an interrupted write cannot leave a truncated file in mu-plugins.
+* REST autoload changes now share the Repair Centre's protected-option list.
 
 = 2.2.0 =
 * Rechecks no longer resolve incidents when scans skip checks, probes fail, or a matching successful save has not been demonstrated.
