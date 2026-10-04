@@ -38,7 +38,7 @@ final class PFC_Database_Backup {
         $token = wp_generate_password( 24, false, false );
         $filename = 'pfc-db-' . gmdate( 'Ymd-His' ) . '-' . strtolower( wp_generate_password( 10, false, false ) ) . '.sql';
         $path = trailingslashit( $dir ) . $filename;
-        $marker = 'Performance Console-BACKUP-COMPLETE-' . wp_generate_uuid4();
+        $marker = 'PFC-BACKUP-COMPLETE-' . wp_generate_uuid4();
         $table_stats = self::table_stats( (array) $tables['tables'] );
         $row_estimates = (array) ( $table_stats['rows'] ?? array() );
         $avg_row_bytes = (array) ( $table_stats['avg_row_bytes'] ?? array() );
@@ -572,7 +572,7 @@ final class PFC_Database_Backup {
     private static function validated_path( array $backup, $must_exist = true ) {
         $path = (string) ( $backup['file_path'] ?? '' );
         $filename = (string) ( $backup['filename'] ?? '' );
-        if ( ! preg_match( '/^pfc-db-[0-9]{8}-[0-9]{6}-[a-z0-9]{6,20}\.sql$/i', $filename ) || basename( $path ) !== $filename ) { return new WP_Error( 'pfc_backup_path', 'Backup file path failed validation.' ); }
+        if ( ! preg_match( '/^(?:pfc|wpi)-db-[0-9]{8}-[0-9]{6}-[a-z0-9]{6,20}\.sql$/i', $filename ) || basename( $path ) !== $filename ) { return new WP_Error( 'pfc_backup_path', 'Backup file path failed validation.' ); }
         $dir = self::normalize_path( dirname( $path ) );
         $allowed = array_map( array( __CLASS__, 'normalize_path' ), self::existing_storage_roots() );
         if ( ! in_array( $dir, $allowed, true ) ) { return new WP_Error( 'pfc_backup_path', 'Backup file is outside the configured private backup directories.' ); }
@@ -620,9 +620,20 @@ final class PFC_Database_Backup {
         return array_values( array_unique( (array) apply_filters( 'pfc_backup_storage_candidates', $candidates ) ) );
     }
 
+    private static function legacy_storage_candidates() {
+        $hash = substr( hash( 'sha256', ( defined( 'AUTH_KEY' ) ? AUTH_KEY : ABSPATH ) . DB_NAME ), 0, 16 );
+        $candidates = array();
+        $parent = dirname( untrailingslashit( ABSPATH ) );
+        $candidates[] = trailingslashit( $parent ) . '.wpi-private-backups-' . $hash;
+        $temp = function_exists( 'get_temp_dir' ) ? get_temp_dir() : sys_get_temp_dir();
+        if ( $temp ) { $candidates[] = trailingslashit( $temp ) . 'wpi-private-backups-' . $hash; }
+        $candidates[] = trailingslashit( WP_CONTENT_DIR ) . 'wpi-private-backups-' . $hash;
+        return array_values( array_unique( $candidates ) );
+    }
+
     private static function existing_storage_roots() {
         $roots = array();
-        foreach ( self::storage_candidates() as $candidate ) { if ( $candidate && is_dir( $candidate ) ) { $roots[] = $candidate; } }
+        foreach ( array_merge( self::storage_candidates(), self::legacy_storage_candidates() ) as $candidate ) { if ( $candidate && is_dir( $candidate ) ) { $roots[] = $candidate; } }
         return $roots;
     }
 

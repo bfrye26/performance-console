@@ -18,7 +18,15 @@ final class PFC_Admin {
         add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_assets' ) );
     }
 
-    public static function menu() { add_menu_page( 'Performance Console', 'Performance', 'manage_options', 'pfc', array( __CLASS__, 'page' ), 'dashicons-performance', 80 ); }
+    public static function menu() {
+        if ( isset( $_GET['page'] ) && 'wpi' === $_GET['page'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $args = wp_unslash( $_GET ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $args['page'] = 'pfc';
+            wp_safe_redirect( add_query_arg( $args, admin_url( 'admin.php' ) ) );
+            exit;
+        }
+        add_menu_page( 'Performance Console', 'Performance', 'manage_options', 'pfc', array( __CLASS__, 'page' ), 'dashicons-performance', 80 );
+    }
 
     public static function enqueue_admin_assets( $hook ) {
         if ( 'toplevel_page_pfc' !== $hook ) { return; }

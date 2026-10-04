@@ -3,8 +3,16 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class PFC_DB {
     const DB_VERSION = '2.2.1';
+    const LEGACY_TABLE_SUFFIXES = array( 'runs', 'queries', 'issues', 'metrics', 'changes', 'option_usage', 'backups' );
+    const LEGACY_OPTION_PATTERNS = array( 'wpi\_%', '\_transient\_wpi\_%', '\_transient\_timeout\_wpi\_%' );
+    const LEGACY_CRON_HOOK = 'wpi_daily_maintenance';
+
+    public static function legacy_table_suffixes() { return self::LEGACY_TABLE_SUFFIXES; }
+    public static function legacy_option_patterns() { return self::LEGACY_OPTION_PATTERNS; }
+    public static function legacy_cron_hook() { return self::LEGACY_CRON_HOOK; }
 
     public static function activate() {
+        self::migrate_legacy();
         self::install();
         if ( false === get_option( 'pfc_runtime', false ) ) {
             add_option( 'pfc_runtime', array( 'sample_rate' => 0.0002, 'rum_rate' => 0.005, 'retention_days' => 30 ), '', true );
@@ -27,6 +35,9 @@ final class PFC_DB {
     }
 
     public static function maybe_upgrade() {
+        if ( false === get_option( 'pfc_db_version', false ) ) {
+            self::migrate_legacy();
+        }
         $previous = (string) get_option( 'pfc_db_version', '' );
         if ( $previous !== self::DB_VERSION ) {
             // 1.0 shipped with intentionally temporary high sampling defaults and no settings UI.
@@ -59,6 +70,43 @@ final class PFC_DB {
             }
         }
         add_action( 'pfc_daily_maintenance', array( __CLASS__, 'cleanup' ) );
+    }
+
+    public static function legacy_state_exists() {
+        global $wpdb;
+        if ( false !== get_option( 'wpi_db_version', false ) ) { return true; }
+        $legacy = $wpdb->prefix . 'wpi_runs';
+        return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $legacy ) ) ) === $legacy;
+    }
+
+    public static function migrate_legacy() {
+        global $wpdb;
+        if ( ! self::legacy_state_exists() ) { return; }
+
+        foreach ( self::LEGACY_TABLE_SUFFIXES as $suffix ) {
+            $old = $wpdb->prefix . 'wpi_' . $suffix;
+            $new = $wpdb->prefix . 'pfc_' . $suffix;
+            if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $old ) ) ) !== $old ) { continue; }
+            if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $new ) ) ) === $new ) { continue; }
+            $wpdb->query( "RENAME TABLE `{$old}` TO `{$new}`" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        }
+
+        $patterns = self::LEGACY_OPTION_PATTERNS;
+        $placeholders = implode( ',', array_fill( 0, count( $patterns ), '%s' ) );
+        $names = $wpdb->get_col( $wpdb->prepare( "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE {$placeholders}", $patterns ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        if ( $names ) {
+            $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_name = REPLACE(option_name, 'wpi_', 'pfc_') WHERE option_name LIKE {$placeholders}", $patterns ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+            wp_cache_delete( 'alloptions', 'options' );
+            foreach ( $names as $name ) { wp_cache_delete( str_replace( 'wpi_', 'pfc_', (string) $name ), 'options' ); }
+        }
+
+        $timestamp = wp_next_scheduled( self::LEGACY_CRON_HOOK );
+        if ( $timestamp ) { wp_unschedule_event( $timestamp, self::LEGACY_CRON_HOOK ); }
+        if ( ! wp_next_scheduled( 'pfc_daily_maintenance' ) ) {
+            wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pfc_daily_maintenance' );
+        }
+
+        PFC_Bootstrap::install();
     }
 
     private static function migrate_incidents() {

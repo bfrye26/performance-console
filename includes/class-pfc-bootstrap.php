@@ -7,7 +7,12 @@ final class PFC_Bootstrap {
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-performance-console-bootstrap.php'; }
 
-    private static function legacy_path() { return trailingslashit( WPMU_PLUGIN_DIR ) . 'performance-console-bootstrap.php'; }
+    private static function legacy_paths() {
+        return array(
+            trailingslashit( WPMU_PLUGIN_DIR ) . '000-wp-performance-inspector-bootstrap.php',
+            trailingslashit( WPMU_PLUGIN_DIR ) . 'wp-performance-inspector-bootstrap.php',
+        );
+    }
 
     private static function rendered_template() {
         $template = file_get_contents( PFC_DIR . 'mu-plugin/performance-console-bootstrap.php' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
@@ -36,8 +41,9 @@ final class PFC_Bootstrap {
             return new WP_Error( 'pfc_mu_write', 'Unable to write MU bootstrap.' );
         }
         @chmod( $target, 0644 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
-        $legacy = self::legacy_path();
-        if ( $legacy !== $target && file_exists( $legacy ) ) { @unlink( $legacy ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+        foreach ( self::legacy_paths() as $legacy ) {
+            if ( $legacy !== $target && file_exists( $legacy ) ) { @unlink( $legacy ); } // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
+        }
         set_transient( 'pfc_bootstrap_checked', self::VERSION, DAY_IN_SECONDS );
         return true;
     }

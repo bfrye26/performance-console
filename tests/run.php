@@ -15,6 +15,7 @@ function esc_url_raw( $url, $protocols = null ) { return filter_var( $url, FILTE
 function home_url( $path = '' ) { return 'http://example.test:8080' . $path; }
 
 require_once dirname( __DIR__ ) . '/includes/class-pfc-utils.php';
+require_once dirname( __DIR__ ) . '/includes/class-pfc-db.php';
 require_once dirname( __DIR__ ) . '/includes/class-pfc-bootstrap.php';
 require_once dirname( __DIR__ ) . '/includes/class-pfc-database-health.php';
 require_once dirname( __DIR__ ) . '/includes/class-pfc-database-repair.php';
@@ -200,6 +201,46 @@ test_case( 'uninstall removes every plugin data store', static function (): void
     }
     assert_same( true, false !== strpos( $source, 'wp_clear_scheduled_hook' ) );
     assert_same( true, false !== strpos( $source, '000-performance-console-bootstrap.php' ) );
+} );
+
+test_case( 'legacy rename map covers every pre-rename data store', static function (): void {
+    assert_same( array( 'runs', 'queries', 'issues', 'metrics', 'changes', 'option_usage', 'backups' ), PFC_DB::legacy_table_suffixes() );
+    assert_same( array( 'wpi\_%', '\_transient\_wpi\_%', '\_transient\_timeout\_wpi\_%' ), PFC_DB::legacy_option_patterns() );
+    assert_same( 'wpi_daily_maintenance', PFC_DB::legacy_cron_hook() );
+} );
+
+test_case( 'MU bootstrap install removes legacy wpi filenames', static function (): void {
+    $source = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-pfc-bootstrap.php' );
+    assert_same( true, false !== strpos( $source, '000-wp-performance-inspector-bootstrap.php' ) );
+    assert_same( true, false !== strpos( $source, 'wp-performance-inspector-bootstrap.php' ) );
+    assert_same( true, false !== strpos( $source, 'legacy_paths' ) );
+} );
+
+test_case( 'uninstall removes both the pfc and legacy wpi data stores', static function (): void {
+    $source = (string) file_get_contents( dirname( __DIR__ ) . '/uninstall.php' );
+    foreach ( array( 'runs', 'queries', 'issues', 'metrics', 'changes', 'option_usage', 'backups' ) as $suffix ) {
+        assert_same( true, false !== strpos( $source, "'" . $suffix . "'" ) );
+    }
+    assert_same( true, false !== strpos( $source, '{$wpdb->prefix}pfc_{$pfc_suffix}' ) );
+    assert_same( true, false !== strpos( $source, '{$wpdb->prefix}wpi_{$pfc_suffix}' ) );
+    assert_same( true, false !== strpos( $source, "'wpi_'" ) );
+    assert_same( true, false !== strpos( $source, "wp_clear_scheduled_hook( 'wpi_daily_maintenance' )" ) );
+    assert_same( true, false !== strpos( $source, '000-wp-performance-inspector-bootstrap.php' ) );
+    assert_same( true, false !== strpos( $source, 'wpi-private-backups-' ) );
+    assert_same( true, false !== strpos( $source, 'wpi-db-*.sql' ) );
+} );
+
+test_case( 'legacy menu slug redirects to the pfc page', static function (): void {
+    $source = (string) file_get_contents( dirname( __DIR__ ) . '/includes/class-pfc-admin.php' );
+    assert_same( true, false !== strpos( $source, "'wpi' === \$_GET['page']" ) );
+    assert_same( true, false !== strpos( $source, 'add_query_arg' ) );
+} );
+
+test_case( 'legacy wpi database backups stay verifiable after migration', static function (): void {
+    $output = array(); $code = 0;
+    exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/backup-legacy.php' ), $output, $code );
+    assert_same( 0, $code );
+    assert_same( 'accepted', implode( '', $output ) );
 } );
 
 $failures = 0;
