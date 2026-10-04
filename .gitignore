@@ -1,5 +1,7 @@
 /dist/
 /node_modules/
+.worktrees/
+.superpowers/
 *.log
 *.sql
 *.zip
