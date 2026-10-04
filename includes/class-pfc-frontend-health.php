@@ -1,7 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_Frontend_Health {
+final class PFC_Frontend_Health {
     public static function inspect( $deep = false ) {
         $targets = array( home_url( '/' ) );
         $types = get_post_types( array( 'publicly_queryable' => true ), 'names' );
@@ -12,9 +12,9 @@ final class WPI_Frontend_Health {
             if ( ! empty( $recent[0] ) ) { $targets[] = get_permalink( $recent[0] ); }
         }
         if ( $deep ) {
-            $runtime = get_option( 'wpi_runtime', array() );
+            $runtime = get_option( 'pfc_runtime', array() );
             foreach ( (array) ( $runtime['route_urls'] ?? array() ) as $custom_url ) {
-                if ( WPI_Utils::same_origin_url( $custom_url ) ) { $targets[] = esc_url_raw( $custom_url ); }
+                if ( PFC_Utils::same_origin_url( $custom_url ) ) { $targets[] = esc_url_raw( $custom_url ); }
             }
         }
         $targets = array_values( array_unique( array_filter( $targets ) ) );
@@ -29,8 +29,8 @@ final class WPI_Frontend_Health {
             'timeout' => 20,
             'redirection' => 3,
             'sslverify' => apply_filters( 'https_local_ssl_verify', false ),
-            'headers' => array( 'Cache-Control' => 'no-cache', 'X-WPI-Probe' => 'frontend-health' ),
-            'user-agent' => 'WP Performance Inspector/' . WPI_VERSION . '; ' . home_url( '/' ),
+            'headers' => array( 'Cache-Control' => 'no-cache', 'X-PFC-Probe' => 'frontend-health' ),
+            'user-agent' => 'Performance Console/' . PFC_VERSION . '; ' . home_url( '/' ),
         ) );
         $elapsed = ( microtime( true ) - $start ) * 1000;
         if ( is_wp_error( $response ) ) {
@@ -126,49 +126,49 @@ final class WPI_Frontend_Health {
         foreach ( $health['pages'] as $page ) {
             $route = $page['url'] ?? '';
             if ( empty( $page['ok'] ) ) {
-                WPI_Utils::issue( 'frontend', 'critical', 'Frontend diagnostic request failed', esc_html( $page['error'] ?? ( 'HTTP ' . ( $page['status'] ?? 0 ) ) ), ( $page['total_ms'] ?? 0 ) . ' ms', 'Resolve loopback/upstream errors before evaluating frontend optimization.', $route );
+                PFC_Utils::issue( 'frontend', 'critical', 'Frontend diagnostic request failed', esc_html( $page['error'] ?? ( 'HTTP ' . ( $page['status'] ?? 0 ) ) ), ( $page['total_ms'] ?? 0 ) . ' ms', 'Resolve loopback/upstream errors before evaluating frontend optimization.', $route );
                 continue;
             }
             if ( $page['total_ms'] > 1500 ) {
-                WPI_Utils::issue( 'frontend', 'critical', 'Frontend route responds slowly to a local HTTP probe', 'The diagnostic GET completed in approximately ' . esc_html( $page['total_ms'] ) . ' ms.', $page['total_ms'] . ' ms', 'Compare with signed PHP profiling. If PHP is fast but this probe is slow, inspect reverse proxy, TLS, CDN, DNS and upstream network layers.', $route );
+                PFC_Utils::issue( 'frontend', 'critical', 'Frontend route responds slowly to a local HTTP probe', 'The diagnostic GET completed in approximately ' . esc_html( $page['total_ms'] ) . ' ms.', $page['total_ms'] . ' ms', 'Compare with signed PHP profiling. If PHP is fast but this probe is slow, inspect reverse proxy, TLS, CDN, DNS and upstream network layers.', $route );
             } elseif ( $page['total_ms'] > 700 ) {
-                WPI_Utils::issue( 'frontend', 'high', 'Frontend route has elevated response time', 'The diagnostic GET completed in approximately ' . esc_html( $page['total_ms'] ) . ' ms.', $page['total_ms'] . ' ms', 'Run a signed route profile and compare PHP/database/HTTP timings to the full HTTP response time.', $route );
+                PFC_Utils::issue( 'frontend', 'high', 'Frontend route has elevated response time', 'The diagnostic GET completed in approximately ' . esc_html( $page['total_ms'] ) . ' ms.', $page['total_ms'] . ' ms', 'Run a signed route profile and compare PHP/database/HTTP timings to the full HTTP response time.', $route );
             }
             if ( $page['html_bytes'] > 500 * KB_IN_BYTES ) {
-                WPI_Utils::issue( 'frontend', 'high', 'HTML document is unusually large', 'The HTML response is approximately ' . esc_html( size_format( $page['html_bytes'] ) ) . '.', size_format( $page['html_bytes'] ), 'Inspect page-builder output, inline JSON/CSS/JS and repeated markup. Large HTML increases TTFB transfer and browser parse cost.', $route );
+                PFC_Utils::issue( 'frontend', 'high', 'HTML document is unusually large', 'The HTML response is approximately ' . esc_html( size_format( $page['html_bytes'] ) ) . '.', size_format( $page['html_bytes'] ), 'Inspect page-builder output, inline JSON/CSS/JS and repeated markup. Large HTML increases TTFB transfer and browser parse cost.', $route );
             }
             if ( $page['inline_script_bytes'] > 300 * KB_IN_BYTES ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Large amount of inline JavaScript', 'Inline JavaScript totals approximately ' . esc_html( size_format( $page['inline_script_bytes'] ) ) . '.', size_format( $page['inline_script_bytes'] ), 'Identify plugins/themes injecting large inline state/configuration and move/cache data where appropriate.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Large amount of inline JavaScript', 'Inline JavaScript totals approximately ' . esc_html( size_format( $page['inline_script_bytes'] ) ) . '.', size_format( $page['inline_script_bytes'] ), 'Identify plugins/themes injecting large inline state/configuration and move/cache data where appropriate.', $route );
             }
             if ( $page['inline_style_bytes'] > 250 * KB_IN_BYTES ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Large amount of inline CSS', 'Inline styles total approximately ' . esc_html( size_format( $page['inline_style_bytes'] ) ) . '.', size_format( $page['inline_style_bytes'] ), 'Review builder/generated CSS and remove styles for components not present on the route.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Large amount of inline CSS', 'Inline styles total approximately ' . esc_html( size_format( $page['inline_style_bytes'] ) ) . '.', size_format( $page['inline_style_bytes'] ), 'Review builder/generated CSS and remove styles for components not present on the route.', $route );
             }
             if ( $page['assets']['total'] > 150 ) {
-                WPI_Utils::issue( 'frontend', 'high', 'Very high frontend asset/request count', 'At least ' . intval( $page['assets']['total'] ) . ' script/style/image/iframe URLs were found in the HTML.', $page['assets']['total'] . ' resources', 'Use the component breakdown to identify plugins/themes loading assets globally. Conditionally enqueue route-specific assets.', $route );
+                PFC_Utils::issue( 'frontend', 'high', 'Very high frontend asset/request count', 'At least ' . intval( $page['assets']['total'] ) . ' script/style/image/iframe URLs were found in the HTML.', $page['assets']['total'] . ' resources', 'Use the component breakdown to identify plugins/themes loading assets globally. Conditionally enqueue route-specific assets.', $route );
             }
             if ( $page['assets']['third_party'] > 25 ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Many third-party resources are loaded', intval( $page['assets']['third_party'] ) . ' resources point to other hosts.', $page['assets']['third_party'] . ' third-party resources', 'Reduce third-party tags, defer non-critical integrations and check which services block rendering or main-thread work.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Many third-party resources are loaded', intval( $page['assets']['third_party'] ) . ' resources point to other hosts.', $page['assets']['third_party'] . ' third-party resources', 'Reduce third-party tags, defer non-critical integrations and check which services block rendering or main-thread work.', $route );
             }
             if ( count( $page['assets']['duplicates'] ) > 3 ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Duplicate frontend resource URLs detected', count( $page['assets']['duplicates'] ) . ' resource URLs appear more than once.', count( $page['assets']['duplicates'] ) . ' duplicate resources', 'Identify duplicate enqueue/injection paths in the listed plugin/theme components.' , $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Duplicate frontend resource URLs detected', count( $page['assets']['duplicates'] ) . ' resource URLs appear more than once.', count( $page['assets']['duplicates'] ) . ' duplicate resources', 'Identify duplicate enqueue/injection paths in the listed plugin/theme components.' , $route );
             }
             $markup = $page['markup'] ?? array();
             if ( (int) ( $markup['head_blocking_scripts'] ?? 0 ) > 8 ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Many potentially render-blocking scripts are in the document head', intval( $markup['head_blocking_scripts'] ) . ' external head scripts were found without async, defer or module semantics.', $markup['head_blocking_scripts'] . ' head scripts', 'Use the component/asset breakdown to defer non-critical scripts and remove plugins that enqueue code on routes where it is unused.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Many potentially render-blocking scripts are in the document head', intval( $markup['head_blocking_scripts'] ) . ' external head scripts were found without async, defer or module semantics.', $markup['head_blocking_scripts'] . ' head scripts', 'Use the component/asset breakdown to defer non-critical scripts and remove plugins that enqueue code on routes where it is unused.', $route );
             }
             if ( (int) ( $markup['stylesheets'] ?? 0 ) > 20 ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Large number of stylesheet requests', intval( $markup['stylesheets'] ) . ' stylesheet links were found in the HTML.', $markup['stylesheets'] . ' stylesheets', 'Consolidate or conditionally load plugin/theme CSS where practical. Prioritize removing unused route-wide styles over indiscriminate concatenation on HTTP/2/3.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Large number of stylesheet requests', intval( $markup['stylesheets'] ) . ' stylesheet links were found in the HTML.', $markup['stylesheets'] . ' stylesheets', 'Consolidate or conditionally load plugin/theme CSS where practical. Prioritize removing unused route-wide styles over indiscriminate concatenation on HTTP/2/3.', $route );
             }
             if ( (int) ( $markup['images_missing_dimensions'] ?? 0 ) > 5 ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'Many images do not declare width and height', intval( $markup['images_missing_dimensions'] ) . ' image tags lack one or both intrinsic dimensions.', $markup['images_missing_dimensions'] . ' images', 'Ensure rendered image markup includes intrinsic dimensions or an equivalent reserved aspect ratio to reduce layout shifts.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'Many images do not declare width and height', intval( $markup['images_missing_dimensions'] ) . ' image tags lack one or both intrinsic dimensions.', $markup['images_missing_dimensions'] . ' images', 'Ensure rendered image markup includes intrinsic dimensions or an equivalent reserved aspect ratio to reduce layout shifts.', $route );
             }
             $image_count = (int) ( $markup['images'] ?? 0 );
             $lazy_count = (int) ( $markup['images_lazy'] ?? 0 );
             if ( $image_count > 12 && $lazy_count < max( 1, (int) floor( ( $image_count - 3 ) * 0.5 ) ) ) {
-                WPI_Utils::issue( 'frontend', 'info', 'Few below-the-fold images explicitly use lazy loading', $lazy_count . ' of ' . $image_count . ' image tags declare <code>loading="lazy"</code>.', $lazy_count . '/' . $image_count . ' lazy', 'Do not lazy-load the likely LCP/hero image. Verify below-the-fold images are lazy-loaded either by WordPress core or the rendering layer.', $route );
+                PFC_Utils::issue( 'frontend', 'info', 'Few below-the-fold images explicitly use lazy loading', $lazy_count . ' of ' . $image_count . ' image tags declare <code>loading="lazy"</code>.', $lazy_count . '/' . $image_count . ' lazy', 'Do not lazy-load the likely LCP/hero image. Verify below-the-fold images are lazy-loaded either by WordPress core or the rendering layer.', $route );
             }
             if ( $page['dom_nodes_estimate'] > 3000 ) {
-                WPI_Utils::issue( 'frontend', 'warning', 'HTML has a very large DOM estimate', 'Approximately ' . number_format_i18n( $page['dom_nodes_estimate'] ) . ' elements were found in the response HTML.', number_format_i18n( $page['dom_nodes_estimate'] ) . ' nodes', 'Reduce deeply nested builder/layout markup and repeated off-screen elements.', $route );
+                PFC_Utils::issue( 'frontend', 'warning', 'HTML has a very large DOM estimate', 'Approximately ' . number_format_i18n( $page['dom_nodes_estimate'] ) . ' elements were found in the response HTML.', number_format_i18n( $page['dom_nodes_estimate'] ) . ' nodes', 'Reduce deeply nested builder/layout markup and repeated off-screen elements.', $route );
             }
         }
     }

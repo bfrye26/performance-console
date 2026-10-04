@@ -1,7 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_Profiler {
+final class PFC_Profiler {
     private static $start = 0.0;
     private static $http = array();
     private static $http_starts = array();
@@ -13,14 +13,14 @@ final class WPI_Profiler {
 
     public static function init() {
         global $wpdb;
-        self::$start = isset( $GLOBALS['wpi_diag_start'] ) ? (float) $GLOBALS['wpi_diag_start'] : microtime( true );
-        $deep = defined( 'WPI_DEEP_DIAGNOSTIC' ) && WPI_DEEP_DIAGNOSTIC;
-        $early_sample = defined( 'WPI_SAMPLED_REQUEST' ) && WPI_SAMPLED_REQUEST;
+        self::$start = isset( $GLOBALS['pfc_diag_start'] ) ? (float) $GLOBALS['pfc_diag_start'] : microtime( true );
+        $deep = defined( 'PFC_DEEP_DIAGNOSTIC' ) && PFC_DEEP_DIAGNOSTIC;
+        $early_sample = defined( 'PFC_SAMPLED_REQUEST' ) && PFC_SAMPLED_REQUEST;
         self::$sample = $deep || $early_sample;
 
         // Fallback if the MU bootstrap is not installed yet. This misses early plugin-load SQL but still provides useful request data.
-        if ( ! self::$sample && ! defined( 'WPI_SAMPLING_DECIDED' ) ) {
-            $runtime = get_option( 'wpi_runtime', array( 'sample_rate' => 0.0002 ) );
+        if ( ! self::$sample && ! defined( 'PFC_SAMPLING_DECIDED' ) ) {
+            $runtime = get_option( 'pfc_runtime', array( 'sample_rate' => 0.0002 ) );
             $rate = max( 0, min( 1, (float) ( $runtime['sample_rate'] ?? 0.0002 ) ) );
             self::$sample = $rate > 0 && mt_rand() / mt_getrandmax() <= $rate;
             if ( self::$sample && ! defined( 'SAVEQUERIES' ) ) { define( 'SAVEQUERIES', true ); }
@@ -50,7 +50,7 @@ final class WPI_Profiler {
             add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
             add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
         }
-        if ( defined( 'WPI_SAVE_DIAGNOSTIC' ) && WPI_SAVE_DIAGNOSTIC ) {
+        if ( defined( 'PFC_SAVE_DIAGNOSTIC' ) && PFC_SAVE_DIAGNOSTIC ) {
             add_action( 'wp_after_insert_post', array( __CLASS__, 'record_saved_post' ), PHP_INT_MAX, 2 );
             foreach ( array( 'save_post','wp_insert_post','wp_after_insert_post','post_updated','transition_post_status','added_post_meta','updated_post_meta','deleted_post_meta' ) as $hook ) {
                 add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
@@ -108,14 +108,14 @@ final class WPI_Profiler {
     }
 
     public static function register_dynamic_save_timers() {
-        $context = (array) ( $GLOBALS['wpi_save_capture'] ?? array() );
+        $context = (array) ( $GLOBALS['pfc_save_capture'] ?? array() );
         $post_type = sanitize_key( (string) ( $context['post_type'] ?? '' ) );
         if ( ! empty( $context['post_id'] ) ) { $post_type = sanitize_key( (string) get_post_type( (int) $context['post_id'] ) ); }
         if ( ! $post_type ) { return; }
         foreach ( (array) get_post_types( array(), 'objects' ) as $object ) {
             if ( $post_type === sanitize_key( (string) ( $object->rest_base ?? '' ) ) ) { $post_type = $object->name; break; }
         }
-        $GLOBALS['wpi_save_capture']['post_type'] = $post_type;
+        $GLOBALS['pfc_save_capture']['post_type'] = $post_type;
         foreach ( array( 'save_post_' . $post_type, 'rest_after_insert_' . $post_type ) as $hook ) {
             add_action( $hook, array( __CLASS__, 'hook_start' ), PHP_INT_MIN );
             add_action( $hook, array( __CLASS__, 'hook_stop' ), PHP_INT_MAX );
@@ -139,7 +139,7 @@ final class WPI_Profiler {
     public static function http_debug( $response, $context, $class, $parsed_args, $url ) {
         if ( 'response' !== $context ) { return; }
         $trace = debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 16 );
-        $component = WPI_Utils::component_from_trace( $trace );
+        $component = PFC_Utils::component_from_trace( $trace );
         $started = array();
         if ( ! empty( self::$http_starts[ $url ] ) ) { $started = array_shift( self::$http_starts[ $url ] ); }
         $elapsed = ! empty( $started['start'] ) ? ( microtime( true ) - $started['start'] ) * 1000 : 0;
@@ -165,9 +165,9 @@ final class WPI_Profiler {
         $query_count = (int) $wpdb->num_queries;
         $run_payload = array();
         $queries_by_pattern = array();
-        $deep = defined( 'WPI_DEEP_DIAGNOSTIC' ) && WPI_DEEP_DIAGNOSTIC;
-        $save = defined( 'WPI_SAVE_DIAGNOSTIC' ) && WPI_SAVE_DIAGNOSTIC;
-        $save_context = (array) ( $GLOBALS['wpi_save_capture'] ?? array() );
+        $deep = defined( 'PFC_DEEP_DIAGNOSTIC' ) && PFC_DEEP_DIAGNOSTIC;
+        $save = defined( 'PFC_SAVE_DIAGNOSTIC' ) && PFC_SAVE_DIAGNOSTIC;
+        $save_context = (array) ( $GLOBALS['pfc_save_capture'] ?? array() );
         if ( $save && (int) ( $save_context['user_id'] ?? 0 ) !== get_current_user_id() ) { return; }
         $trace_map = self::trace_map();
 
@@ -177,11 +177,11 @@ final class WPI_Profiler {
                 $sec = (float) ( $q[1] ?? 0 );
                 $db_ms += $sec * 1000;
                 if ( ! $deep || $query_index >= 7500 ) { continue; }
-                $norm = WPI_Utils::normalize_sql( $sql );
+                $norm = PFC_Utils::normalize_sql( $sql );
                 $rawhash = md5( $sql );
                 $trace = array();
                 if ( ! empty( $trace_map[ $rawhash ] ) ) { $trace = array_shift( $trace_map[ $rawhash ] ); }
-                $comp = WPI_Utils::component_from_trace( $trace );
+                $comp = PFC_Utils::component_from_trace( $trace );
                 $hash = md5( $norm . '|' . $comp['type'] . '|' . $comp['slug'] );
                 if ( ! isset( $queries_by_pattern[ $hash ] ) ) {
                     $queries_by_pattern[ $hash ] = array( 'sql' => $norm, 'count' => 0, 'total' => 0, 'max' => 0, 'component' => $comp, 'raw' => $sql );
@@ -193,7 +193,7 @@ final class WPI_Profiler {
         }
 
         $http_ms = array_sum( array_map( static function ( $r ) { return (float) $r['ms']; }, self::$http ) );
-        $route = $deep ? WPI_Utils::route() : WPI_Utils::route_group();
+        $route = $deep ? PFC_Utils::route() : PFC_Utils::route_group();
         $phases = self::phase_durations();
         $run_payload['http'] = array_slice( self::$http, 0, 100 );
         $run_payload['deep'] = $deep;
@@ -202,11 +202,11 @@ final class WPI_Profiler {
         $run_payload['database_errors'] = self::database_errors( (array) $EZSQL_ERROR, $trace_map );
         $run_payload['included_files'] = count( get_included_files() );
         $run_payload['query_timing_available'] = defined( 'SAVEQUERIES' ) && SAVEQUERIES;
-        $run_payload['measurement_scope'] = isset( $GLOBALS['wpi_diag_start'] ) ? 'mu-bootstrap-to-shutdown' : 'plugins-loaded-to-shutdown';
+        $run_payload['measurement_scope'] = isset( $GLOBALS['pfc_diag_start'] ) ? 'mu-bootstrap-to-shutdown' : 'plugins-loaded-to-shutdown';
         $run_payload['query_details_truncated'] = count( (array) ( $wpdb->queries ?? array() ) ) > 7500;
-        $run_payload['query_traces_at_limit'] = count( (array) ( $GLOBALS['wpi_query_traces'] ?? array() ) ) >= 5000;
-        $run_payload['probe_id'] = sanitize_text_field( (string) ( $GLOBALS['wpi_probe_id'] ?? '' ) );
-        $run_payload['excluded_plugin'] = sanitize_text_field( (string) ( $GLOBALS['wpi_excluded_plugin'] ?? '' ) );
+        $run_payload['query_traces_at_limit'] = count( (array) ( $GLOBALS['pfc_query_traces'] ?? array() ) ) >= 5000;
+        $run_payload['probe_id'] = sanitize_text_field( (string) ( $GLOBALS['pfc_probe_id'] ?? '' ) );
+        $run_payload['excluded_plugin'] = sanitize_text_field( (string) ( $GLOBALS['pfc_excluded_plugin'] ?? '' ) );
         if ( $save ) {
             $last_error = error_get_last();
             $fatal = $last_error && in_array( $last_error['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ), true );
@@ -223,8 +223,8 @@ final class WPI_Profiler {
             $run_payload['save_hook_components'] = self::save_hook_components();
         }
 
-        $wpdb->insert( WPI_Utils::table( 'runs' ), array(
-            'created_at' => WPI_Utils::now_mysql(), 'route' => $route, 'mode' => $save ? 'save' : ( $deep ? 'deep' : 'sample' ),
+        $wpdb->insert( PFC_Utils::table( 'runs' ), array(
+            'created_at' => PFC_Utils::now_mysql(), 'route' => $route, 'mode' => $save ? 'save' : ( $deep ? 'deep' : 'sample' ),
             'php_ms' => round( $php_ms, 3 ), 'db_ms' => round( $db_ms, 3 ), 'query_count' => $query_count,
             'http_ms' => round( $http_ms, 3 ), 'http_count' => count( self::$http ), 'memory_peak' => memory_get_peak_usage( true ),
             'probe_id' => $run_payload['probe_id'], 'excluded_plugin' => $run_payload['excluded_plugin'],
@@ -233,32 +233,32 @@ final class WPI_Profiler {
         $run_id = (int) $wpdb->insert_id;
         self::persist_option_usage();
 
-        WPI_Utils::begin_issue_collection( $deep ? 'manual' : 'passive', $run_id );
+        PFC_Utils::begin_issue_collection( $deep ? 'manual' : 'passive', $run_id );
         if ( $deep ) { self::persist_queries( $run_id, $queries_by_pattern, $route ); }
         self::request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, $run_payload );
         if ( $save ) {
-            $verification = get_transient( 'wpi_save_verify_' . sanitize_key( (string) ( $save_context['capture_id'] ?? '' ) ) );
+            $verification = get_transient( 'pfc_save_verify_' . sanitize_key( (string) ( $save_context['capture_id'] ?? '' ) ) );
             if ( $verification ) {
                 $matched = is_array( $verification ) && self::comparable_save( (array) ( $verification['context'] ?? array() ), $run_payload['save_context'] );
                 $improved = $matched && ! empty( $run_payload['save_outcome']['successful'] ) && $php_ms < 750;
                 $verification_key = is_array( $verification ) ? (string) ( $verification['key'] ?? '' ) : (string) $verification;
-                WPI_Utils::set_incident_status( $verification_key, $improved ? 'observing' : 'open' );
-                set_transient( 'wpi_save_capture_notice_' . get_current_user_id(), array( 'ok' => $improved, 'message' => $improved ? 'A matching successful save was below the slow-save threshold. The incident is observing, not resolved; repeat representative saves before marking it resolved.' : 'Recheck inconclusive or still slow. The incident remains open: use the same content and save type, and confirm the editor reports success.' ), 10 * MINUTE_IN_SECONDS );
-                delete_transient( 'wpi_save_verify_' . sanitize_key( (string) $save_context['capture_id'] ) );
+                PFC_Utils::set_incident_status( $verification_key, $improved ? 'observing' : 'open' );
+                set_transient( 'pfc_save_capture_notice_' . get_current_user_id(), array( 'ok' => $improved, 'message' => $improved ? 'A matching successful save was below the slow-save threshold. The incident is observing, not resolved; repeat representative saves before marking it resolved.' : 'Recheck inconclusive or still slow. The incident remains open: use the same content and save type, and confirm the editor reports success.' ), 10 * MINUTE_IN_SECONDS );
+                delete_transient( 'pfc_save_verify_' . sanitize_key( (string) $save_context['capture_id'] ) );
             }
             self::save_issue( $route, $php_ms, $db_ms, $http_ms, $run_payload );
         }
         self::http_issues( $route );
         self::fatal_issue( $route );
-        WPI_Utils::end_issue_collection();
+        PFC_Utils::end_issue_collection();
     }
 
 
     private static function persist_option_usage() {
         if ( empty( self::$option_hits ) ) { return; }
         global $wpdb;
-        $table = WPI_Utils::table( 'option_usage' );
-        $now = WPI_Utils::now_mysql();
+        $table = PFC_Utils::table( 'option_usage' );
+        $now = PFC_Utils::now_mysql();
         $chunks = array(); $args = array();
         foreach ( array_slice( self::$option_hits, 0, 750, true ) as $name => $hits ) {
             $chunks[] = '(%s,%s,%d,1)';
@@ -271,7 +271,7 @@ final class WPI_Profiler {
 
     private static function trace_map() {
         $trace_map = array();
-        foreach ( (array) ( $GLOBALS['wpi_query_traces'] ?? array() ) as $t ) {
+        foreach ( (array) ( $GLOBALS['pfc_query_traces'] ?? array() ) as $t ) {
             if ( isset( $t['sql_hash'], $t['trace'] ) ) { $trace_map[ $t['sql_hash'] ][] = $t['trace']; }
         }
         return $trace_map;
@@ -285,14 +285,14 @@ final class WPI_Profiler {
             $trace = array();
             $hash = md5( $sql );
             if ( ! empty( $trace_map[ $hash ] ) ) { $trace = array_shift( $trace_map[ $hash ] ); }
-            $component = WPI_Utils::component_from_trace( $trace );
+            $component = PFC_Utils::component_from_trace( $trace );
             $item = array(
                 'error' => sanitize_text_field( mb_substr( (string) ( $error['error_str'] ?? 'Database error' ), 0, 500 ) ),
-                'query' => WPI_Utils::normalize_sql( $sql ),
+                'query' => PFC_Utils::normalize_sql( $sql ),
                 'component' => $component,
             );
             $out[] = $item;
-            WPI_Utils::issue( 'database', 'critical', 'Database query error from ' . $component['slug'], esc_html( $item['error'] ) . '<br><code>' . esc_html( mb_substr( $item['query'], 0, 900 ) ) . '</code>', 'Query failed', 'Fix the SQL/schema/plugin error before performance tuning. Repeated failed queries can create retries and expensive fallback behaviour.', WPI_Utils::route() );
+            PFC_Utils::issue( 'database', 'critical', 'Database query error from ' . $component['slug'], esc_html( $item['error'] ) . '<br><code>' . esc_html( mb_substr( $item['query'], 0, 900 ) ) . '</code>', 'Query failed', 'Fix the SQL/schema/plugin error before performance tuning. Repeated failed queries can create retries and expensive fallback behaviour.', PFC_Utils::route() );
         }
         return $out;
     }
@@ -306,7 +306,7 @@ final class WPI_Profiler {
     }
 
     private static function phase_durations() {
-        $marks = (array) ( $GLOBALS['wpi_phase_marks'] ?? array() );
+        $marks = (array) ( $GLOBALS['pfc_phase_marks'] ?? array() );
         $order = array( 'mu_plugin_bootstrap','muplugins_loaded','plugins_loaded','setup_theme','after_setup_theme','init','wp_loaded','wp','template_redirect','wp_head','wp_footer' );
         $out = array();
         $previous = null;
@@ -328,7 +328,7 @@ final class WPI_Profiler {
             if ( $p['max'] >= 25 && preg_match( '/^\s*(SELECT|WITH)\b/i', $p['raw'] ) ) { $explain = self::safe_explain( $p['raw'] ); }
             $analysis = self::analyze_query( $p, $explain );
             $c = $p['component'];
-            $wpdb->insert( WPI_Utils::table( 'queries' ), array(
+            $wpdb->insert( PFC_Utils::table( 'queries' ), array(
                 'run_id' => $run_id, 'pattern_hash' => $hash, 'normalized_sql' => $p['sql'], 'count' => $p['count'],
                 'total_ms' => round( $p['total'], 3 ), 'max_ms' => round( $p['max'], 3 ), 'component_type' => $c['type'],
                 'component_slug' => $c['slug'], 'source_file' => $c['file'], 'source_line' => $c['line'], 'explain_json' => wp_json_encode( array( 'plan' => $explain, 'analysis' => $analysis ) ),
@@ -336,7 +336,7 @@ final class WPI_Profiler {
             if ( $analysis['problem'] ) {
                 $severity = ( $p['total'] >= 500 || $p['max'] >= 500 || $analysis['rows_examined_estimate'] >= 1000000 ) ? 'critical' : 'high';
                 $details = array_filter( $analysis['reasons'] );
-                WPI_Utils::issue( 'database', $severity, 'Expensive query from ' . $c['slug'], '<code>' . esc_html( mb_substr( $p['sql'], 0, 1200 ) ) . '</code><br>' . esc_html( implode( '; ', $details ) ), round( $p['total'] ) . ' ms total / ' . intval( $p['count'] ) . ' calls', self::query_recommendation( $analysis ), $route );
+                PFC_Utils::issue( 'database', $severity, 'Expensive query from ' . $c['slug'], '<code>' . esc_html( mb_substr( $p['sql'], 0, 1200 ) ) . '</code><br>' . esc_html( implode( '; ', $details ) ), round( $p['total'] ) . ' ms total / ' . intval( $p['count'] ) . ' calls', self::query_recommendation( $analysis ), $route );
             }
         }
     }
@@ -450,7 +450,7 @@ final class WPI_Profiler {
         }
         $safe_parts = array();
         foreach ( $candidate as $column ) { $safe_parts[] = '`' . $column . '`'; }
-        $name = 'wpi_candidate_' . substr( md5( $table . ':' . implode( ',', $candidate ) ), 0, 10 );
+        $name = 'pfc_candidate_' . substr( md5( $table . ':' . implode( ',', $candidate ) ), 0, 10 );
         $rows_estimate = (int) ( $explain[0]['rows'] ?? 0 );
         return array(
             'table' => $table,
@@ -467,7 +467,7 @@ final class WPI_Profiler {
         $parts = array();
         if ( $analysis['full_scan'] || $analysis['no_key_selected'] ) { $parts[] = 'Review predicates and the EXPLAIN plan for a selective composite index rather than adding indexes blindly.'; }
         if ( $analysis['filesort'] || $analysis['temporary'] ) { $parts[] = 'Reduce/sort a smaller result set and check whether an index can satisfy WHERE + ORDER BY/GROUP BY.'; }
-        if ( ! empty( $analysis['index_candidate']['sql'] ) ) { $parts[] = 'WPI generated a review-only candidate index: <code>' . esc_html( $analysis['index_candidate']['sql'] ) . '</code> Test EXPLAIN and write/storage impact on staging before adding it.'; }
+        if ( ! empty( $analysis['index_candidate']['sql'] ) ) { $parts[] = 'Performance Console generated a review-only candidate index: <code>' . esc_html( $analysis['index_candidate']['sql'] ) . '</code> Test EXPLAIN and write/storage impact on staging before adding it.'; }
         $parts[] = 'If the same result repeats within one request, cache/prime it or batch the lookup.';
         return implode( ' ', $parts );
     }
@@ -505,7 +505,7 @@ final class WPI_Profiler {
             elseif ( is_object( $callback ) && ! $callback instanceof Closure ) { $reflection = new ReflectionMethod( $callback, '__invoke' ); }
             else { $reflection = new ReflectionFunction( $callback ); }
             $file = (string) $reflection->getFileName();
-            return $file ? WPI_Utils::component_from_file( $file ) : array( 'type' => 'core', 'slug' => 'wordpress' );
+            return $file ? PFC_Utils::component_from_file( $file ) : array( 'type' => 'core', 'slug' => 'wordpress' );
         } catch ( Throwable $e ) {
             return array( 'type' => 'core', 'slug' => 'wordpress' );
         }
@@ -553,40 +553,40 @@ final class WPI_Profiler {
             $recommendation = $http_ms >= $db_ms ? 'Move non-essential remote synchronization out of the save request, or cache/batch it.' : 'Reduce or batch the attributed save-time queries and check their EXPLAIN evidence.';
             $confidence = 88;
         }
-        WPI_Utils::issue( 'save', $php_ms >= 1500 ? 'critical' : 'high', 'Slow WordPress save', $message, round( $php_ms ) . ' ms PHP time', $recommendation, $route, array( 'component' => $component, 'confidence' => $confidence ) );
+        PFC_Utils::issue( 'save', $php_ms >= 1500 ? 'critical' : 'high', 'Slow WordPress save', $message, round( $php_ms ) . ' ms PHP time', $recommendation, $route, array( 'component' => $component, 'confidence' => $confidence ) );
     }
 
     private static function request_issues( $route, $php_ms, $db_ms, $query_count, $http_ms, array $payload ) {
-        if ( defined( 'WPI_QUERY_TIMING_BLOCKED' ) && WPI_QUERY_TIMING_BLOCKED ) {
-            WPI_Utils::issue( 'database', 'warning', 'Deep query timing is blocked by configuration', 'SAVEQUERIES is explicitly defined as false, so WordPress will not retain per-query timing even for this private diagnostic request.', 'Slow-query timing unavailable', 'Remove the explicit false SAVEQUERIES definition while running a signed diagnostic, or use database slow-query/performance-schema tooling at the server layer.', $route );
+        if ( defined( 'PFC_QUERY_TIMING_BLOCKED' ) && PFC_QUERY_TIMING_BLOCKED ) {
+            PFC_Utils::issue( 'database', 'warning', 'Deep query timing is blocked by configuration', 'SAVEQUERIES is explicitly defined as false, so WordPress will not retain per-query timing even for this private diagnostic request.', 'Slow-query timing unavailable', 'Remove the explicit false SAVEQUERIES definition while running a signed diagnostic, or use database slow-query/performance-schema tooling at the server layer.', $route );
         }
         $known_dominant = ( $db_ms >= 250 && $db_ms >= $php_ms * 0.45 ) || ( self::has_actionable_http() && $http_ms >= $php_ms * 0.35 );
         if ( $php_ms > 1500 && ! $known_dominant ) {
-            WPI_Utils::issue( 'request', 'critical', 'Very slow PHP request', 'This sampled request required more than 1.5 seconds of PHP execution.', round( $php_ms ) . ' ms', 'Inspect database, external HTTP, hook/phase and plugin evidence for the dominant contributor.', $route );
+            PFC_Utils::issue( 'request', 'critical', 'Very slow PHP request', 'This sampled request required more than 1.5 seconds of PHP execution.', round( $php_ms ) . ' ms', 'Inspect database, external HTTP, hook/phase and plugin evidence for the dominant contributor.', $route );
         } elseif ( $php_ms > 750 && ! $known_dominant ) {
-            WPI_Utils::issue( 'request', 'high', 'Slow PHP request', 'This sampled request required more than 750 ms of PHP execution.', round( $php_ms ) . ' ms', 'Inspect database, external HTTP, hook/phase and plugin evidence for the dominant contributor.', $route );
+            PFC_Utils::issue( 'request', 'high', 'Slow PHP request', 'This sampled request required more than 750 ms of PHP execution.', round( $php_ms ) . ' ms', 'Inspect database, external HTTP, hook/phase and plugin evidence for the dominant contributor.', $route );
         }
         if ( $db_ms > 500 ) {
-            WPI_Utils::issue( 'database', 'critical', 'Database time dominates a request', 'SQL execution consumed approximately ' . round( $db_ms ) . ' ms in this sampled request.', round( $db_ms ) . ' ms DB time', 'Run a signed deep profile to identify the query patterns responsible.', $route );
+            PFC_Utils::issue( 'database', 'critical', 'Database time dominates a request', 'SQL execution consumed approximately ' . round( $db_ms ) . ' ms in this sampled request.', round( $db_ms ) . ' ms DB time', 'Run a signed deep profile to identify the query patterns responsible.', $route );
         } elseif ( $db_ms > 250 ) {
-            WPI_Utils::issue( 'database', 'high', 'Database time is elevated on a request', 'SQL execution consumed approximately ' . round( $db_ms ) . ' ms.', round( $db_ms ) . ' ms DB time', 'Run a signed deep profile and prioritize queries by cumulative time, not query count alone.', $route );
+            PFC_Utils::issue( 'database', 'high', 'Database time is elevated on a request', 'SQL execution consumed approximately ' . round( $db_ms ) . ' ms.', round( $db_ms ) . ' ms DB time', 'Run a signed deep profile and prioritize queries by cumulative time, not query count alone.', $route );
         }
         if ( $query_count > 1000 ) {
-            WPI_Utils::issue( 'database', 'critical', 'Extremely high query count on a request', number_format_i18n( $query_count ) . ' SQL queries executed.', number_format_i18n( $query_count ) . ' queries', 'Look for duplicate/N+1 query patterns and plugins repeatedly loading metadata/options.', $route );
+            PFC_Utils::issue( 'database', 'critical', 'Extremely high query count on a request', number_format_i18n( $query_count ) . ' SQL queries executed.', number_format_i18n( $query_count ) . ' queries', 'Look for duplicate/N+1 query patterns and plugins repeatedly loading metadata/options.', $route );
         } elseif ( $query_count > 400 ) {
-            WPI_Utils::issue( 'database', 'high', 'High query count on a request', number_format_i18n( $query_count ) . ' SQL queries executed.', number_format_i18n( $query_count ) . ' queries', 'Run a deep profile and group queries by normalized pattern and component.', $route );
+            PFC_Utils::issue( 'database', 'high', 'High query count on a request', number_format_i18n( $query_count ) . ' SQL queries executed.', number_format_i18n( $query_count ) . ' queries', 'Run a deep profile and group queries by normalized pattern and component.', $route );
         }
         if ( $http_ms > 750 && ! self::has_actionable_http() ) {
-            WPI_Utils::issue( 'http', 'high', 'Outbound HTTP calls add substantial request latency', 'Blocking HTTP activity consumed approximately ' . round( $http_ms ) . ' ms.', round( $http_ms ) . ' ms HTTP time', 'Cache remote data and move non-essential API synchronization out of page requests.', $route );
+            PFC_Utils::issue( 'http', 'high', 'Outbound HTTP calls add substantial request latency', 'Blocking HTTP activity consumed approximately ' . round( $http_ms ) . ' ms.', round( $http_ms ) . ' ms HTTP time', 'Cache remote data and move non-essential API synchronization out of page requests.', $route );
         }
-        $limit = WPI_Utils::ini_bytes( defined( 'WP_MEMORY_LIMIT' ) ? WP_MEMORY_LIMIT : ini_get( 'memory_limit' ) );
+        $limit = PFC_Utils::ini_bytes( defined( 'WP_MEMORY_LIMIT' ) ? WP_MEMORY_LIMIT : ini_get( 'memory_limit' ) );
         $peak = memory_get_peak_usage( true );
         if ( $limit > 0 && $peak / $limit > 0.85 ) {
-            WPI_Utils::issue( 'server', 'high', 'Request is close to its PHP memory limit', 'Peak memory was ' . esc_html( size_format( $peak ) ) . ' of approximately ' . esc_html( size_format( $limit ) ) . '.', round( 100 * $peak / $limit, 1 ) . '% of limit', 'Find large result sets, unbounded object hydration, image operations or plugins retaining large arrays before raising the memory limit.', $route );
+            PFC_Utils::issue( 'server', 'high', 'Request is close to its PHP memory limit', 'Peak memory was ' . esc_html( size_format( $peak ) ) . ' of approximately ' . esc_html( size_format( $limit ) ) . '.', round( 100 * $peak / $limit, 1 ) . '% of limit', 'Find large result sets, unbounded object hydration, image operations or plugins retaining large arrays before raising the memory limit.', $route );
         }
         foreach ( $payload['hook_ms'] as $hook => $ms ) {
             if ( $ms >= 200 ) {
-                WPI_Utils::issue( 'hooks', 'high', 'Slow WordPress hook: ' . $hook, 'Callbacks on <code>' . esc_html( $hook ) . '</code> consumed approximately ' . round( $ms ) . ' ms in total.', round( $ms ) . ' ms', 'Inspect callbacks registered to this hook and correlate them with plugin exclusion/query evidence.', $route );
+                PFC_Utils::issue( 'hooks', 'high', 'Slow WordPress hook: ' . $hook, 'Callbacks on <code>' . esc_html( $hook ) . '</code> consumed approximately ' . round( $ms ) . ' ms in total.', round( $ms ) . ' ms', 'Inspect callbacks registered to this hook and correlate them with plugin exclusion/query evidence.', $route );
             }
         }
     }
@@ -602,11 +602,11 @@ final class WPI_Profiler {
         foreach ( self::$http as $item ) {
             $component = $item['component']['slug'] ?? 'unknown';
             if ( $item['error'] ) {
-                WPI_Utils::issue( 'http', 'critical', 'Outbound HTTP request failed from ' . $component, esc_html( $item['host'] . $item['path'] . ': ' . $item['error'] ), round( $item['ms'] ) . ' ms', 'Handle the failure without blocking normal page generation, and verify DNS/TLS/API availability and timeouts.', $route );
+                PFC_Utils::issue( 'http', 'critical', 'Outbound HTTP request failed from ' . $component, esc_html( $item['host'] . $item['path'] . ': ' . $item['error'] ), round( $item['ms'] ) . ' ms', 'Handle the failure without blocking normal page generation, and verify DNS/TLS/API availability and timeouts.', $route );
             } elseif ( $item['status'] >= 400 ) {
-                WPI_Utils::issue( 'http', 'high', 'Outbound HTTP request returned an error status from ' . $component, esc_html( $item['host'] . $item['path'] . ' returned HTTP ' . $item['status'] ), round( $item['ms'] ) . ' ms', 'Fix the integration endpoint/authentication and avoid retrying failed requests on every page load.', $route );
+                PFC_Utils::issue( 'http', 'high', 'Outbound HTTP request returned an error status from ' . $component, esc_html( $item['host'] . $item['path'] . ' returned HTTP ' . $item['status'] ), round( $item['ms'] ) . ' ms', 'Fix the integration endpoint/authentication and avoid retrying failed requests on every page load.', $route );
             } elseif ( $item['blocking'] && $item['ms'] >= 300 ) {
-                WPI_Utils::issue( 'http', $item['ms'] >= 1000 ? 'critical' : 'high', 'Slow blocking HTTP request from ' . $component, esc_html( $item['host'] . $item['path'] ) . ' blocked PHP for approximately ' . round( $item['ms'] ) . ' ms.', round( $item['ms'] ) . ' ms', 'Cache the response or move synchronization to cron/Action Scheduler/background processing.', $route );
+                PFC_Utils::issue( 'http', $item['ms'] >= 1000 ? 'critical' : 'high', 'Slow blocking HTTP request from ' . $component, esc_html( $item['host'] . $item['path'] ) . ' blocked PHP for approximately ' . round( $item['ms'] ) . ' ms.', round( $item['ms'] ) . ' ms', 'Cache the response or move synchronization to cron/Action Scheduler/background processing.', $route );
             }
         }
     }
@@ -614,14 +614,14 @@ final class WPI_Profiler {
     private static function fatal_issue( $route ) {
         $last = error_get_last();
         if ( ! is_array( $last ) || ! in_array( (int) $last['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ), true ) ) { return; }
-        $component = WPI_Utils::component_from_file( $last['file'] ?? '' );
-        WPI_Utils::issue( 'errors', 'critical', 'Fatal PHP error during sampled request', '<code>' . esc_html( $component['type'] . ':' . $component['slug'] ) . '</code><br>' . esc_html( mb_substr( (string) $last['message'], 0, 700 ) ), 'Request may fail completely', 'Fix the fatal error before performance tuning. Repeated fatals can also prevent cron, cache warming and background jobs from completing.', $route );
+        $component = PFC_Utils::component_from_file( $last['file'] ?? '' );
+        PFC_Utils::issue( 'errors', 'critical', 'Fatal PHP error during sampled request', '<code>' . esc_html( $component['type'] . ':' . $component['slug'] ) . '</code><br>' . esc_html( mb_substr( (string) $last['message'], 0, 700 ) ), 'Request may fail completely', 'Fix the fatal error before performance tuning. Repeated fatals can also prevent cron, cache warming and background jobs from completing.', $route );
     }
 
     public static function site_health( $tests ) {
-        $tests['direct']['wpi_bootstrap'] = array( 'label' => 'Performance Inspector bootstrap', 'test' => static function () {
-            $s = WPI_Bootstrap::status();
-            return array( 'label' => $s['installed'] ? 'Performance Inspector early bootstrap is installed' : 'Performance Inspector early bootstrap is missing', 'status' => $s['installed'] ? 'good' : 'recommended', 'badge' => array( 'label' => 'Performance' ), 'description' => '<p>' . ( $s['installed'] ? 'Deep diagnostics and sampled query timing can begin before normal plugins load.' : 'Install the MU bootstrap to enable early plugin/query diagnostics.' ) . '</p>', 'actions' => '' );
+        $tests['direct']['pfc_bootstrap'] = array( 'label' => 'Performance Console bootstrap', 'test' => static function () {
+            $s = PFC_Bootstrap::status();
+            return array( 'label' => $s['installed'] ? 'Performance Console early bootstrap is installed' : 'Performance Console early bootstrap is missing', 'status' => $s['installed'] ? 'good' : 'recommended', 'badge' => array( 'label' => 'Performance' ), 'description' => '<p>' . ( $s['installed'] ? 'Deep diagnostics and sampled query timing can begin before normal plugins load.' : 'Install the MU bootstrap to enable early plugin/query diagnostics.' ) . '</p>', 'actions' => '' );
         } );
         return $tests;
     }

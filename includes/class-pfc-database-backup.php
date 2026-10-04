@@ -9,7 +9,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  * HTTP timeout. Backups contain table schema/data only; they do not include
  * database users, server configuration, routines, events or host snapshots.
  */
-final class WPI_Database_Backup {
+final class PFC_Database_Backup {
     const DEFAULT_BATCH_ROWS = 1000;
     const MIN_BATCH_ROWS = 50;
     const MAX_BATCH_ROWS = 5000;
@@ -18,7 +18,7 @@ final class WPI_Database_Backup {
     const BATCH_TARGET_BYTES = 2097152; // Aim for ~2 MiB of SQL per SELECT/INSERT chunk.
     const VERIFIED_MAX_AGE = 86400; // 24 hours for satisfying a mutating repair.
 
-    public static function table_name() { return WPI_Utils::table( 'backups' ); }
+    public static function table_name() { return PFC_Utils::table( 'backups' ); }
 
     public static function create( $scope = 'wordpress' ) {
         global $wpdb;
@@ -28,17 +28,17 @@ final class WPI_Database_Backup {
 
         $tables = self::database_tables( $scope );
         if ( is_wp_error( $tables ) ) { return $tables; }
-        if ( empty( $tables['tables'] ) ) { return new WP_Error( 'wpi_backup_tables', 'No database tables were found for the selected backup scope.' ); }
+        if ( empty( $tables['tables'] ) ) { return new WP_Error( 'pfc_backup_tables', 'No database tables were found for the selected backup scope.' ); }
 
         $space = self::space_preflight( $dir, (array) $tables['tables'] );
         if ( ! empty( $space['available'] ) && empty( $space['ok'] ) ) {
-            return new WP_Error( 'wpi_backup_space', 'The backup location does not appear to have enough free space for a conservative database export safety margin.' );
+            return new WP_Error( 'pfc_backup_space', 'The backup location does not appear to have enough free space for a conservative database export safety margin.' );
         }
 
         $token = wp_generate_password( 24, false, false );
-        $filename = 'wpi-db-' . gmdate( 'Ymd-His' ) . '-' . strtolower( wp_generate_password( 10, false, false ) ) . '.sql';
+        $filename = 'pfc-db-' . gmdate( 'Ymd-His' ) . '-' . strtolower( wp_generate_password( 10, false, false ) ) . '.sql';
         $path = trailingslashit( $dir ) . $filename;
-        $marker = 'WPI-BACKUP-COMPLETE-' . wp_generate_uuid4();
+        $marker = 'Performance Console-BACKUP-COMPLETE-' . wp_generate_uuid4();
         $table_stats = self::table_stats( (array) $tables['tables'] );
         $row_estimates = (array) ( $table_stats['rows'] ?? array() );
         $avg_row_bytes = (array) ( $table_stats['avg_row_bytes'] ?? array() );
@@ -71,11 +71,11 @@ final class WPI_Database_Backup {
 
         $header = self::header_sql( $scope, $tables );
         if ( false === self::append_file( $path, $header, true ) ) {
-            return new WP_Error( 'wpi_backup_write', 'Unable to create the database backup file.' );
+            return new WP_Error( 'pfc_backup_write', 'Unable to create the database backup file.' );
         }
         @chmod( $path, 0600 ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod
 
-        $now = WPI_Utils::now_mysql();
+        $now = PFC_Utils::now_mysql();
         $ok = $wpdb->insert(
             self::table_name(),
             array(
@@ -99,7 +99,7 @@ final class WPI_Database_Backup {
         );
         if ( false === $ok ) {
             @unlink( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink
-            return new WP_Error( 'wpi_backup_record', 'Unable to record the database backup job.' );
+            return new WP_Error( 'pfc_backup_record', 'Unable to record the database backup job.' );
         }
         return self::get( (int) $wpdb->insert_id );
     }
@@ -121,10 +121,10 @@ final class WPI_Database_Backup {
         $started = microtime( true );
         $step_rows = 0;
         $step_bytes = 0;
-        $time_budget = max( 1.5, min( 20.0, (float) apply_filters( 'wpi_backup_step_time_budget', self::STEP_TIME_BUDGET ) ) );
+        $time_budget = max( 1.5, min( 20.0, (float) apply_filters( 'pfc_backup_step_time_budget', self::STEP_TIME_BUDGET ) ) );
         $php_limit = (int) ini_get( 'max_execution_time' );
         if ( $php_limit > 0 ) { $time_budget = min( $time_budget, max( 1.0, $php_limit - 2.0 ) ); }
-        $byte_budget = max( MB_IN_BYTES, min( 64 * MB_IN_BYTES, (int) apply_filters( 'wpi_backup_step_target_bytes', self::STEP_TARGET_BYTES ) ) );
+        $byte_budget = max( MB_IN_BYTES, min( 64 * MB_IN_BYTES, (int) apply_filters( 'pfc_backup_step_target_bytes', self::STEP_TARGET_BYTES ) ) );
 
         while ( true ) {
             $idx = (int) ( $state['table_index'] ?? 0 );
@@ -227,7 +227,7 @@ final class WPI_Database_Backup {
         $wpdb->update(
             self::table_name(),
             array(
-                'updated_at' => WPI_Utils::now_mysql(),
+                'updated_at' => PFC_Utils::now_mysql(),
                 'status' => 'running',
                 'size_bytes' => (int) @filesize( $path ),
                 'tables_done' => (int) $state['tables_done'],
@@ -252,7 +252,7 @@ final class WPI_Database_Backup {
         $wpdb->update(
             self::table_name(),
             array(
-                'updated_at' => WPI_Utils::now_mysql(),
+                'updated_at' => PFC_Utils::now_mysql(),
                 'status' => 'ready_verify',
                 'size_bytes' => (int) @filesize( $path ),
                 'tables_done' => count( (array) $state['tables'] ),
@@ -269,22 +269,22 @@ final class WPI_Database_Backup {
         global $wpdb;
         $backup = self::get( $id );
         if ( is_wp_error( $backup ) ) { return $backup; }
-        if ( ! in_array( $backup['status'], array( 'ready_verify','verified' ), true ) ) { return new WP_Error( 'wpi_backup_not_ready', 'The backup export has not finished yet.' ); }
+        if ( ! in_array( $backup['status'], array( 'ready_verify','verified' ), true ) ) { return new WP_Error( 'pfc_backup_not_ready', 'The backup export has not finished yet.' ); }
         $path = self::validated_path( $backup );
         if ( is_wp_error( $path ) ) { return $path; }
         $state = json_decode( (string) $backup['state_json'], true );
-        if ( ! is_array( $state ) || empty( $state['marker'] ) ) { return new WP_Error( 'wpi_backup_state', 'Backup verification state is unavailable.' ); }
+        if ( ! is_array( $state ) || empty( $state['marker'] ) ) { return new WP_Error( 'pfc_backup_state', 'Backup verification state is unavailable.' ); }
         $size = (int) @filesize( $path );
-        if ( $size < 128 ) { return new WP_Error( 'wpi_backup_short', 'The backup file is unexpectedly small.' ); }
+        if ( $size < 128 ) { return new WP_Error( 'pfc_backup_short', 'The backup file is unexpectedly small.' ); }
         $tail = self::file_tail( $path, 8192 );
-        if ( false === $tail || false === strpos( $tail, '-- ' . $state['marker'] ) ) { return new WP_Error( 'wpi_backup_incomplete', 'The backup completion marker was not found. Resume or recreate the backup.' ); }
-        if ( (int) ( $backup['tables_done'] ?? 0 ) !== (int) ( $backup['table_count'] ?? 0 ) ) { return new WP_Error( 'wpi_backup_tables_incomplete', 'Not every table in the backup manifest was completed.' ); }
+        if ( false === $tail || false === strpos( $tail, '-- ' . $state['marker'] ) ) { return new WP_Error( 'pfc_backup_incomplete', 'The backup completion marker was not found. Resume or recreate the backup.' ); }
+        if ( (int) ( $backup['tables_done'] ?? 0 ) !== (int) ( $backup['table_count'] ?? 0 ) ) { return new WP_Error( 'pfc_backup_tables_incomplete', 'Not every table in the backup manifest was completed.' ); }
         $hash = @hash_file( 'sha256', $path );
-        if ( ! is_string( $hash ) || 64 !== strlen( $hash ) ) { return new WP_Error( 'wpi_backup_hash', 'The backup file could not be checksummed.' ); }
+        if ( ! is_string( $hash ) || 64 !== strlen( $hash ) ) { return new WP_Error( 'pfc_backup_hash', 'The backup file could not be checksummed.' ); }
         if ( 'verified' === $backup['status'] && ! hash_equals( (string) $backup['sha256'], $hash ) ) {
-            return new WP_Error( 'wpi_backup_changed', 'The export changed after its integrity check. Create a new export; the previous checksum will not be replaced.' );
+            return new WP_Error( 'pfc_backup_changed', 'The export changed after its integrity check. Create a new export; the previous checksum will not be replaced.' );
         }
-        $now = WPI_Utils::now_mysql();
+        $now = PFC_Utils::now_mysql();
         $wpdb->update(
             self::table_name(),
             array( 'updated_at' => $now, 'status' => 'verified', 'size_bytes' => $size, 'sha256' => $hash, 'verified_at' => $now, 'error_text' => '' ),
@@ -311,7 +311,7 @@ final class WPI_Database_Backup {
     public static function get( $id ) {
         global $wpdb;
         $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table_name() . ' WHERE id=%d', absint( $id ) ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        return $row ? $row : new WP_Error( 'wpi_backup_missing', 'Database backup not found.' );
+        return $row ? $row : new WP_Error( 'pfc_backup_missing', 'Database backup not found.' );
     }
 
     public static function list_backups( $limit = 20 ) {
@@ -342,7 +342,7 @@ final class WPI_Database_Backup {
         header( 'X-Content-Type-Options: nosniff' );
         @set_time_limit( 0 );
         $fh = fopen( $path, 'rb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-        if ( false === $fh ) { return new WP_Error( 'wpi_backup_open', 'Unable to open the backup file for download.' ); }
+        if ( false === $fh ) { return new WP_Error( 'pfc_backup_open', 'Unable to open the backup file for download.' ); }
         while ( ! feof( $fh ) ) {
             echo fread( $fh, 1024 * 1024 ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped,WordPress.WP.AlternativeFunctions.file_system_operations_fread
             if ( function_exists( 'fastcgi_finish_request' ) ) { /* Do not call; it would terminate the stream. */ }
@@ -376,7 +376,7 @@ final class WPI_Database_Backup {
     private static function database_tables( $scope ) {
         global $wpdb;
         $rows = $wpdb->get_results( 'SHOW FULL TABLES', ARRAY_N );
-        if ( null === $rows && $wpdb->last_error ) { return new WP_Error( 'wpi_backup_table_list', sanitize_text_field( $wpdb->last_error ) ); }
+        if ( null === $rows && $wpdb->last_error ) { return new WP_Error( 'pfc_backup_table_list', sanitize_text_field( $wpdb->last_error ) ); }
         $tables = array(); $views = array();
         $prefix = (string) $wpdb->base_prefix;
         foreach ( (array) $rows as $row ) {
@@ -413,9 +413,9 @@ final class WPI_Database_Backup {
     private static function header_sql( $scope, array $tables ) {
         global $wpdb;
         $server = sanitize_text_field( (string) $wpdb->db_version() );
-        return "-- WP Performance Inspector database backup\n"
+        return "-- Performance Console database backup\n"
             . '-- Created UTC: ' . gmdate( 'c' ) . "\n"
-            . '-- WPI version: ' . WPI_VERSION . "\n"
+            . '-- Performance Console version: ' . PFC_VERSION . "\n"
             . '-- WordPress version: ' . get_bloginfo( 'version' ) . "\n"
             . '-- Database server: ' . $server . "\n"
             . '-- Scope: ' . $scope . "\n"
@@ -428,14 +428,14 @@ final class WPI_Database_Backup {
     private static function table_schema_sql( $table ) {
         global $wpdb;
         $row = $wpdb->get_row( 'SHOW CREATE TABLE `' . $table . '`', ARRAY_N ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( ! $row || empty( $row[1] ) ) { return new WP_Error( 'wpi_backup_schema', 'Unable to read CREATE TABLE for ' . $table . '.' ); }
+        if ( ! $row || empty( $row[1] ) ) { return new WP_Error( 'pfc_backup_schema', 'Unable to read CREATE TABLE for ' . $table . '.' ); }
         return "-- Table `{$table}`\nDROP TABLE IF EXISTS `{$table}`;\n" . rtrim( (string) $row[1], "; \t\r\n" ) . ";\n\n";
     }
 
     private static function insertable_columns( $table ) {
         global $wpdb;
         $rows = $wpdb->get_results( 'SHOW FULL COLUMNS FROM `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( ! is_array( $rows ) ) { return new WP_Error( 'wpi_backup_columns', 'Unable to inspect columns for ' . $table . '.' ); }
+        if ( ! is_array( $rows ) ) { return new WP_Error( 'pfc_backup_columns', 'Unable to inspect columns for ' . $table . '.' ); }
         $columns = array();
         foreach ( $rows as $row ) {
             $extra = strtolower( (string) ( $row['Extra'] ?? '' ) );
@@ -488,7 +488,7 @@ final class WPI_Database_Backup {
                 $sql = $wpdb->prepare( "SELECT {$select} FROM `{$table}` WHERE {$lhs} > {$rhs} ORDER BY {$order} LIMIT %d", $args ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
             }
         } elseif ( ! empty( $state['cursor_numeric'] ) && ! empty( $state['cursor_column'] ) && preg_match( '/^[A-Za-z0-9_$]+$/', (string) $state['cursor_column'] ) ) {
-            // Backward-compatible resume path for backups created by WPI 1.6.0,
+            // Backward-compatible resume path for backups created by Performance Console 1.6.0,
             // which stored a single numeric cursor instead of cursor_columns.
             $column = (string) $state['cursor_column'];
             if ( null === ( $state['cursor'] ?? null ) ) {
@@ -502,7 +502,7 @@ final class WPI_Database_Backup {
             $sql = $wpdb->prepare( "SELECT {$select} FROM `{$table}` LIMIT %d OFFSET %d", $limit, $offset ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         }
         $rows = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( null === $rows && $wpdb->last_error ) { return new WP_Error( 'wpi_backup_rows', sanitize_text_field( $wpdb->last_error ) ); }
+        if ( null === $rows && $wpdb->last_error ) { return new WP_Error( 'pfc_backup_rows', sanitize_text_field( $wpdb->last_error ) ); }
         return (array) $rows;
     }
 
@@ -511,7 +511,7 @@ final class WPI_Database_Backup {
         if ( ! $rows || ! $columns ) { return ''; }
         $quoted_columns = implode( ',', array_map( static function ( $column ) { return '`' . $column . '`'; }, $columns ) );
         $prefix = 'INSERT INTO `' . $table . '` (' . $quoted_columns . ') VALUES\n';
-        $target = max( 256 * 1024, min( 4 * MB_IN_BYTES, (int) apply_filters( 'wpi_backup_insert_target_bytes', self::BATCH_TARGET_BYTES ) ) );
+        $target = max( 256 * 1024, min( 4 * MB_IN_BYTES, (int) apply_filters( 'pfc_backup_insert_target_bytes', self::BATCH_TARGET_BYTES ) ) );
         $out = '';
         $values = array();
         $bytes = strlen( $prefix );
@@ -558,7 +558,7 @@ final class WPI_Database_Backup {
             self::protect_directory( $candidate );
             return untrailingslashit( $candidate );
         }
-        return new WP_Error( 'wpi_backup_dir', 'No private writable directory is available for database backups. Configure the wpi_backup_storage_candidates filter or create a writable private path.' );
+        return new WP_Error( 'pfc_backup_dir', 'No private writable directory is available for database backups. Configure the pfc_backup_storage_candidates filter or create a writable private path.' );
     }
 
     private static function protect_directory( $dir ) {
@@ -572,11 +572,11 @@ final class WPI_Database_Backup {
     private static function validated_path( array $backup, $must_exist = true ) {
         $path = (string) ( $backup['file_path'] ?? '' );
         $filename = (string) ( $backup['filename'] ?? '' );
-        if ( ! preg_match( '/^wpi-db-[0-9]{8}-[0-9]{6}-[a-z0-9]{6,20}\.sql$/i', $filename ) || basename( $path ) !== $filename ) { return new WP_Error( 'wpi_backup_path', 'Backup file path failed validation.' ); }
+        if ( ! preg_match( '/^pfc-db-[0-9]{8}-[0-9]{6}-[a-z0-9]{6,20}\.sql$/i', $filename ) || basename( $path ) !== $filename ) { return new WP_Error( 'pfc_backup_path', 'Backup file path failed validation.' ); }
         $dir = self::normalize_path( dirname( $path ) );
         $allowed = array_map( array( __CLASS__, 'normalize_path' ), self::existing_storage_roots() );
-        if ( ! in_array( $dir, $allowed, true ) ) { return new WP_Error( 'wpi_backup_path', 'Backup file is outside the configured private backup directories.' ); }
-        if ( $must_exist && ! is_file( $path ) ) { return new WP_Error( 'wpi_backup_file_missing', 'The backup file is missing.' ); }
+        if ( ! in_array( $dir, $allowed, true ) ) { return new WP_Error( 'pfc_backup_path', 'Backup file is outside the configured private backup directories.' ); }
+        if ( $must_exist && ! is_file( $path ) ) { return new WP_Error( 'pfc_backup_file_missing', 'The backup file is missing.' ); }
         return $path;
     }
 
@@ -599,8 +599,8 @@ final class WPI_Database_Backup {
 
     private static function fail( $id, $message ) {
         global $wpdb;
-        $wpdb->update( self::table_name(), array( 'updated_at' => WPI_Utils::now_mysql(), 'status' => 'failed', 'error_text' => sanitize_text_field( (string) $message ) ), array( 'id' => (int) $id ) );
-        return new WP_Error( 'wpi_backup_failed', $message );
+        $wpdb->update( self::table_name(), array( 'updated_at' => PFC_Utils::now_mysql(), 'status' => 'failed', 'error_text' => sanitize_text_field( (string) $message ) ), array( 'id' => (int) $id ) );
+        return new WP_Error( 'pfc_backup_failed', $message );
     }
 
     private static function safe_table_from_list( $table, array $allowed ) {
@@ -612,12 +612,12 @@ final class WPI_Database_Backup {
         $hash = substr( hash( 'sha256', ( defined( 'AUTH_KEY' ) ? AUTH_KEY : ABSPATH ) . DB_NAME ), 0, 16 );
         $candidates = array();
         $parent = dirname( untrailingslashit( ABSPATH ) );
-        $parent_candidate = trailingslashit( $parent ) . '.wpi-private-backups-' . $hash;
+        $parent_candidate = trailingslashit( $parent ) . '.pfc-private-backups-' . $hash;
         if ( is_dir( $parent_candidate ) || ( is_dir( $parent ) && is_writable( $parent ) ) ) { $candidates[] = $parent_candidate; }
         $temp = function_exists( 'get_temp_dir' ) ? get_temp_dir() : sys_get_temp_dir();
-        if ( $temp ) { $candidates[] = trailingslashit( $temp ) . 'wpi-private-backups-' . $hash; }
-        $candidates[] = trailingslashit( WP_CONTENT_DIR ) . 'wpi-private-backups-' . $hash;
-        return array_values( array_unique( (array) apply_filters( 'wpi_backup_storage_candidates', $candidates ) ) );
+        if ( $temp ) { $candidates[] = trailingslashit( $temp ) . 'pfc-private-backups-' . $hash; }
+        $candidates[] = trailingslashit( WP_CONTENT_DIR ) . 'pfc-private-backups-' . $hash;
+        return array_values( array_unique( (array) apply_filters( 'pfc_backup_storage_candidates', $candidates ) ) );
     }
 
     private static function existing_storage_roots() {

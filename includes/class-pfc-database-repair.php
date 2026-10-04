@@ -5,7 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
  * Explicit database remediation. Nothing in this class runs automatically.
  * Web requests are intentionally size-gated; WP-CLI can opt in with --force-large.
  */
-final class WPI_Database_Repair {
+final class PFC_Database_Repair {
     const WEB_ROW_LIMIT  = 500000;
     const WEB_SIZE_LIMIT = 256000000; // ~244 MiB; conservative on shared/production DBs.
     const MAX_BATCH      = 1000;
@@ -72,7 +72,7 @@ final class WPI_Database_Repair {
                 'safety' => $large ? 'cli-review' : 'high-review',
                 'available' => ! $large,
                 'detail' => $detail,
-                'reason' => $large ? 'The affected table exceeds the normal browser ALTER threshold. Use the guarded Maintenance Fix workflow with a verified backup, or the equivalent WP-CLI repair.' : ( $primary_dependency ? 'This column participates in a malformed live PRIMARY KEY. WPI will replace that live key and apply the WordPress column definition in one coordinated ALTER, then verify both structures.' : 'WPI re-checks the installed WordPress schema immediately before ALTER, requires a verified backup plus an explicit schema-change acknowledgement, requests non-blocking InnoDB DDL where supported, and verifies the column afterward.' ),
+                'reason' => $large ? 'The affected table exceeds the normal browser ALTER threshold. Use the guarded Maintenance Fix workflow with a verified backup, or the equivalent WP-CLI repair.' : ( $primary_dependency ? 'This column participates in a malformed live PRIMARY KEY. Performance Console will replace that live key and apply the WordPress column definition in one coordinated ALTER, then verify both structures.' : 'Performance Console re-checks the installed WordPress schema immediately before ALTER, requires a verified backup plus an explicit schema-change acknowledgement, requests non-blocking InnoDB DDL where supported, and verifies the column afterward.' ),
                 'requires_backup' => true,
                 'requires_danger_ack' => true,
                 'button_label' => 'Apply Schema Correction',
@@ -90,7 +90,7 @@ final class WPI_Database_Repair {
                 'safety' => $large ? 'cli-review' : 'high-review',
                 'available' => ! $large,
                 'detail' => 'Expected: ' . (string) $item['definition'] . '. Live: ' . (string) $item['actual'] . '.',
-                'reason' => $large ? 'The affected table exceeds the normal browser DDL threshold. Use the guarded Maintenance Fix workflow or WP-CLI during a maintenance window.' : 'WPI revalidates the live and expected definitions, preflights unique keys for duplicate values, replaces only the named drifted core index, and verifies it afterward.',
+                'reason' => $large ? 'The affected table exceeds the normal browser DDL threshold. Use the guarded Maintenance Fix workflow or WP-CLI during a maintenance window.' : 'Performance Console revalidates the live and expected definitions, preflights unique keys for duplicate values, replaces only the named drifted core index, and verifies it afterward.',
                 'requires_backup' => true,
                 'requires_danger_ack' => true,
                 'button_label' => 'Rebuild Core Index',
@@ -127,7 +127,7 @@ final class WPI_Database_Repair {
         }
 
         $observed_days = ! empty( $options['usage_started_at'] ) ? ( time() - (int) $options['usage_started_at'] ) / DAY_IN_SECONDS : 0;
-        if ( WPI_Utils::autoload_review_ready( (array) ( $options['usage_coverage'] ?? array() ), $observed_days ) ) {
+        if ( PFC_Utils::autoload_review_ready( (array) ( $options['usage_coverage'] ?? array() ), $observed_days ) ) {
             foreach ( array_slice( (array) ( $options['largest_autoload'] ?? array() ), 0, 30 ) as $row ) {
                 $name = (string) ( $row['option_name'] ?? '' );
                 if ( (int) ( $row['bytes'] ?? 0 ) < 128 * KB_IN_BYTES || ! empty( $row['last_seen'] ) || self::protected_option( $name ) ) { continue; }
@@ -173,7 +173,7 @@ final class WPI_Database_Repair {
                         'safety'    => $large ? 'cli-review' : 'review',
                         'available' => ! $large,
                         'detail'    => 'Integrity evidence appears to reference secondary index ' . $suspect_index . '.',
-                        'reason'    => $large ? 'The table exceeds the normal wp-admin DDL threshold. Use the guarded Maintenance Fix workflow after verifying a current backup, or WP-CLI for the largest tables.' : 'Recreates only the named secondary BTREE index using ALGORITHM=INPLACE, LOCK=NONE. WPI fails closed if the server cannot perform that online operation.',
+                        'reason'    => $large ? 'The table exceeds the normal wp-admin DDL threshold. Use the guarded Maintenance Fix workflow after verifying a current backup, or WP-CLI for the largest tables.' : 'Recreates only the named secondary BTREE index using ALGORITHM=INPLACE, LOCK=NONE. Performance Console fails closed if the server cannot perform that online operation.',
                         'requires_backup' => true,
                         'args'      => array( 'table' => $table, 'index' => $suspect_index ),
                     );
@@ -187,7 +187,7 @@ final class WPI_Database_Repair {
                         'safety'    => 'cli-review',
                         'available' => false,
                         'detail'    => 'Rebuilds the InnoDB table and all indexes in place when the server permits concurrent DML.',
-                        'reason'    => 'This is not a generic corruption repair. Run the recovery preflight first, verify a backup/snapshot and use this only when the table remains readable and a controlled rebuild is appropriate. WPI never falls back to ALGORITHM=COPY.',
+                        'reason'    => 'This is not a generic corruption repair. Run the recovery preflight first, verify a backup/snapshot and use this only when the table remains readable and a controlled rebuild is appropriate. Performance Console never falls back to ALGORITHM=COPY.',
                         'requires_backup' => true,
                         'args'      => array( 'table' => $table ),
                     );
@@ -203,7 +203,7 @@ final class WPI_Database_Repair {
                     'safety'    => $large ? 'cli-review' : 'high-review',
                     'available' => ! $large,
                     'detail'    => $detail,
-                    'reason'    => $large ? 'CSV repair is potentially destructive and the table exceeds the normal browser threshold. Use the guarded Maintenance Fix workflow or WP-CLI only after exporting/verifying the table and acknowledging possible data loss.' : 'CSV REPAIR TABLE may discard rows after the first damaged record. WPI therefore requires both a verified backup and an explicit data-loss acknowledgement before running it, then re-checks the table.',
+                    'reason'    => $large ? 'CSV repair is potentially destructive and the table exceeds the normal browser threshold. Use the guarded Maintenance Fix workflow or WP-CLI only after exporting/verifying the table and acknowledging possible data loss.' : 'CSV REPAIR TABLE may discard rows after the first damaged record. Performance Console therefore requires both a verified backup and an explicit data-loss acknowledgement before running it, then re-checks the table.',
                     'requires_backup' => true,
                     'requires_data_loss_ack' => true,
                     'button_label' => 'Repair CSV Table',
@@ -221,7 +221,7 @@ final class WPI_Database_Repair {
                     'safety'    => $large ? 'cli-review' : 'review',
                     'available' => ! $large,
                     'detail'    => $detail,
-                    'reason'    => $large ? 'Table exceeds the normal wp-admin repair threshold. Use the guarded Maintenance Fix workflow or WP-CLI during a maintenance window.' : 'The detected storage engine supports REPAIR TABLE. WPI still treats this as explicit maintenance and records the operation.',
+                    'reason'    => $large ? 'Table exceeds the normal wp-admin repair threshold. Use the guarded Maintenance Fix workflow or WP-CLI during a maintenance window.' : 'The detected storage engine supports REPAIR TABLE. Performance Console still treats this as explicit maintenance and records the operation.',
                     'requires_backup' => true,
                     'args'      => array( 'table' => $table ),
                 );
@@ -233,13 +233,13 @@ final class WPI_Database_Repair {
                     'safety'    => 'manual',
                     'available' => false,
                     'detail'    => $detail,
-                    'reason'    => (string) ( $caps['notes'] ?? 'This storage engine does not have a repair path WPI can safely automate.' ),
+                    'reason'    => (string) ( $caps['notes'] ?? 'This storage engine does not have a repair path Performance Console can safely automate.' ),
                     'manual_steps' => array(
                         'Verify a current database backup or storage snapshot before changing this table.',
                         'Review SHOW TABLE STATUS and SHOW CREATE TABLE for the affected table and confirm the storage engine and owning plugin/application.',
                         ! empty( $caps['check'] ) ? 'Run CHECK TABLE for fresh integrity evidence before attempting engine-specific maintenance.' : 'Use the storage engine vendor/server tooling to obtain a fresh integrity report; SQL CHECK TABLE is not advertised as supported for this engine.',
                         'Follow the engine-specific rebuild/restore procedure. Do not substitute REPAIR TABLE unless the live server reports that operation as supported for this engine.',
-                        'After recovery, rerun WPI Deep Database Scan and compare schema, integrity and query performance before returning the site to normal traffic.',
+                        'After recovery, rerun Performance Console Deep Database Scan and compare schema, integrity and query performance before returning the site to normal traffic.',
                     ),
                     'sql_preview' => ! empty( $caps['check'] ) ? 'CHECK TABLE `' . $table . '`' : '',
                     'args'      => array(),
@@ -286,13 +286,13 @@ final class WPI_Database_Repair {
             $meta = self::table_meta( $health, $table_name );
             $large = self::is_large_meta( $meta );
             $detail = 'Equivalent indexes: ' . implode( ', ', $names ) . '. Proposed keep: ' . $keep . '; proposed drop: ' . $drop . '.';
-            $reason = $large ? 'The table exceeds the normal browser DDL threshold. WPI provides both a guarded Maintenance Fix workflow and the equivalent CLI repair.' : 'WPI performs a fresh exact-signature comparison immediately before dropping the redundant non-primary index. Because plugins can refer to index names in migrations, this requires explicit acknowledgement and a current backup.';
+            $reason = $large ? 'The table exceeds the normal browser DDL threshold. Performance Console provides both a guarded Maintenance Fix workflow and the equivalent CLI repair.' : 'Performance Console performs a fresh exact-signature comparison immediately before dropping the redundant non-primary index. Because plugins can refer to index names in migrations, this requires explicit acknowledgement and a current backup.';
             if ( $managed ) {
                 $owner = (string) ( $managed['owner'] ?? 'Active plugin' );
                 $canonical = (string) ( $managed['canonical'] ?? '' );
                 $detail .= ' Owner: ' . $owner . '.';
                 if ( $canonical ) { $detail .= ' Canonical index name: ' . $canonical . ( in_array( $canonical, $names, true ) ? ' (present).' : ' (not currently present).' ); }
-                $reason = $owner . ' registered these index names with WPI. WPI keeps the canonical name when present; otherwise it keeps the plugin\'s highest-priority recognized legacy alias. The plugin should continue working because the retained index has the same verified definition.';
+                $reason = $owner . ' registered these index names with Performance Console. Performance Console keeps the canonical name when present; otherwise it keeps the plugin\'s highest-priority recognized legacy alias. The plugin should continue working because the retained index has the same verified definition.';
                 if ( $large ) { $reason .= ' Because this is a large table, use the guarded Maintenance Fix workflow or CLI during a maintenance window.'; }
             }
             $plan = array(
@@ -339,8 +339,8 @@ final class WPI_Database_Repair {
                 'action'    => 'create_missing_core_table',
                 'safety'    => 'high-review',
                 'available' => true,
-                'detail'    => 'The table is absent. WPI can recreate the empty table using the installed WordPress version\'s own schema.',
-                'reason'    => 'This restores schema only, not lost records. If the table previously contained data, restore that data from backup. WPI requires a verified backup and an explicit acknowledgement that an empty table may not recover missing content.',
+                'detail'    => 'The table is absent. Performance Console can recreate the empty table using the installed WordPress version\'s own schema.',
+                'reason'    => 'This restores schema only, not lost records. If the table previously contained data, restore that data from backup. Performance Console requires a verified backup and an explicit acknowledgement that an empty table may not recover missing content.',
                 'requires_backup' => true,
                 'requires_data_loss_ack' => true,
                 'button_label' => 'Create Empty Core Table',
@@ -391,7 +391,7 @@ final class WPI_Database_Repair {
             case 'rollback_change':
                 return self::rollback_change( $args );
             default:
-                return new WP_Error( 'wpi_unknown_repair', 'Unknown database repair action.' );
+                return new WP_Error( 'pfc_unknown_repair', 'Unknown database repair action.' );
         }
     }
 
@@ -402,7 +402,7 @@ final class WPI_Database_Repair {
      */
     public static function transaction_manager_snapshot() {
         global $wpdb;
-        $runtime = WPI_Database_Health::innodb_runtime();
+        $runtime = PFC_Database_Health::innodb_runtime();
         $current_thread = 0;
         $current_database = '';
         $old = $wpdb->suppress_errors( true );
@@ -474,15 +474,15 @@ final class WPI_Database_Repair {
         $level = $high ? 'high' : ( $rows_modified > 0 || $is_blocker || $is_waiting || ! $idle ? 'medium' : 'low' );
 
         if ( $is_current ) {
-            $reason = 'WPI will never terminate the database connection that is rendering the Repair Centre.';
+            $reason = 'Performance Console will never terminate the database connection that is rendering the Repair Centre.';
         } elseif ( $database_mismatch ) {
-            $reason = 'This connection is attached to a different database. WPI will not terminate transactions outside the current WordPress database.';
+            $reason = 'This connection is attached to a different database. Performance Console will not terminate transactions outside the current WordPress database.';
         } elseif ( $system ) {
-            $reason = 'This appears to be a database/server system session. WPI will not terminate system, replication or scheduler connections.';
+            $reason = 'This appears to be a database/server system session. Performance Console will not terminate system, replication or scheduler connections.';
         } elseif ( $rolling_back ) {
             $reason = 'This transaction already appears to be rolling back. Let rollback complete and refresh the status.';
         } elseif ( ! $problem_candidate ) {
-            $reason = 'The transaction is below WPI\'s 30-second DDL-blocking threshold and is not currently a visible blocker/waiter.';
+            $reason = 'The transaction is below Performance Console\'s 30-second DDL-blocking threshold and is not currently a visible blocker/waiter.';
         } elseif ( ! (int) ( $trx['thread_id'] ?? 0 ) ) {
             $reason = 'No killable MySQL thread ID is visible for this transaction.';
         } else {
@@ -514,9 +514,9 @@ final class WPI_Database_Repair {
         global $wpdb;
         $thread_id = absint( $args['thread_id'] ?? 0 );
         $expected_transaction_id = sanitize_text_field( (string) ( $args['transaction_id'] ?? '' ) );
-        if ( ! $thread_id ) { return new WP_Error( 'wpi_thread_id', 'A valid MySQL thread ID is required.' ); }
+        if ( ! $thread_id ) { return new WP_Error( 'pfc_thread_id', 'A valid MySQL thread ID is required.' ); }
         if ( ! self::danger_confirmed( $args ) || empty( $args['rollback_confirmed'] ) ) {
-            return new WP_Error( 'wpi_transaction_ack', 'Confirm that you understand terminating the connection interrupts its request and rolls back uncommitted work.' );
+            return new WP_Error( 'pfc_transaction_ack', 'Confirm that you understand terminating the connection interrupts its request and rolls back uncommitted work.' );
         }
 
         $snapshot = self::transaction_manager_snapshot();
@@ -528,13 +528,13 @@ final class WPI_Database_Repair {
             return array( 'ok' => true, 'message' => 'Thread ' . $thread_id . ' is no longer present in the InnoDB transaction list. No termination was needed.', 'thread_id' => $thread_id, 'already_gone' => true );
         }
         if ( $expected_transaction_id && 0 !== strcmp( $expected_transaction_id, (string) ( $target['id'] ?? '' ) ) ) {
-            return new WP_Error( 'wpi_transaction_changed', 'The MySQL thread now belongs to a different InnoDB transaction. WPI refused to terminate it. Refresh the Transaction Manager and review the new transaction.', array( 'transaction' => $target ) );
+            return new WP_Error( 'pfc_transaction_changed', 'The MySQL thread now belongs to a different InnoDB transaction. Performance Console refused to terminate it. Refresh the Transaction Manager and review the new transaction.', array( 'transaction' => $target ) );
         }
         if ( empty( $target['can_terminate'] ) ) {
-            return new WP_Error( 'wpi_transaction_protected', (string) ( $target['termination_reason'] ?? 'WPI will not terminate this transaction.' ), array( 'transaction' => $target ) );
+            return new WP_Error( 'pfc_transaction_protected', (string) ( $target['termination_reason'] ?? 'Performance Console will not terminate this transaction.' ), array( 'transaction' => $target ) );
         }
         if ( ! empty( $target['requires_high_rollback_ack'] ) && empty( $args['high_rollback_confirmed'] ) ) {
-            return new WP_Error( 'wpi_large_rollback_ack', 'This is a high-risk rollback because of its age or row count. Confirm the high-risk rollback acknowledgement before terminating it.', array( 'transaction' => $target ) );
+            return new WP_Error( 'pfc_large_rollback_ack', 'This is a high-risk rollback because of its age or row count. Confirm the high-risk rollback acknowledgement before terminating it.', array( 'transaction' => $target ) );
         }
 
         $old = $wpdb->suppress_errors( true );
@@ -543,7 +543,7 @@ final class WPI_Database_Repair {
         $wpdb->suppress_errors( $old );
         if ( false === $result ) {
             $message = $error ? sanitize_text_field( $error ) : 'The database server rejected KILL CONNECTION.';
-            return new WP_Error( 'wpi_kill_failed', $message . ' The WordPress database user may not have permission to terminate this connection.', array( 'transaction' => $target ) );
+            return new WP_Error( 'pfc_kill_failed', $message . ' The WordPress database user may not have permission to terminate this connection.', array( 'transaction' => $target ) );
         }
 
         $audit = array(
@@ -627,7 +627,7 @@ final class WPI_Database_Repair {
         if ( isset( $wpdb->termmeta ) ) {
             $map['termmeta'] = array( 'table' => $wpdb->termmeta, 'id' => 'meta_id', 'sql' => "SELECT m.* FROM {$wpdb->termmeta} m LEFT JOIN {$wpdb->terms} t ON t.term_id=m.term_id WHERE t.term_id IS NULL ORDER BY m.meta_id ASC LIMIT %d" );
         }
-        if ( ! isset( $map[ $type ] ) ) { return new WP_Error( 'wpi_orphan_type', 'Unsupported orphan cleanup type.' ); }
+        if ( ! isset( $map[ $type ] ) ) { return new WP_Error( 'pfc_orphan_type', 'Unsupported orphan cleanup type.' ); }
         $spec = $map[ $type ];
         $rows = $wpdb->get_results( $wpdb->prepare( $spec['sql'], $limit ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         if ( ! $rows ) { return array( 'ok' => true, 'deleted' => 0, 'message' => 'No orphan rows remain for ' . $type . '.' ); }
@@ -635,9 +635,9 @@ final class WPI_Database_Repair {
         if ( is_wp_error( $backup ) ) { return $backup; }
         $idcol = self::safe_identifier( $spec['id'] );
         $table = self::safe_table( $spec['table'] );
-        if ( ! $table || ! $idcol ) { return new WP_Error( 'wpi_orphan_identifier', 'Unsafe database identifier.' ); }
+        if ( ! $table || ! $idcol ) { return new WP_Error( 'pfc_orphan_identifier', 'Unsafe database identifier.' ); }
         $ids = array_values( array_filter( array_map( 'absint', wp_list_pluck( $rows, $idcol ) ) ) );
-        if ( ! $ids ) { return new WP_Error( 'wpi_orphan_ids', 'No valid orphan identifiers were returned.' ); }
+        if ( ! $ids ) { return new WP_Error( 'pfc_orphan_ids', 'No valid orphan identifiers were returned.' ); }
         $placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
         $sql = "DELETE FROM `{$table}` WHERE `{$idcol}` IN ({$placeholders})";
         $deleted = (int) $wpdb->query( $wpdb->prepare( $sql, $ids ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
@@ -647,10 +647,10 @@ final class WPI_Database_Repair {
 
     private static function set_autoload( array $args, $autoload ) {
         $name = sanitize_text_field( (string) ( $args['option'] ?? '' ) );
-        if ( '' === $name || self::protected_option( $name ) ) { return new WP_Error( 'wpi_protected_option', 'That option is protected from automatic autoload changes.' ); }
+        if ( '' === $name || self::protected_option( $name ) ) { return new WP_Error( 'pfc_protected_option', 'That option is protected from automatic autoload changes.' ); }
         global $wpdb;
         $row = $wpdb->get_row( $wpdb->prepare( "SELECT autoload,LENGTH(option_value) bytes FROM {$wpdb->options} WHERE option_name=%s", $name ), ARRAY_A );
-        if ( ! $row ) { return new WP_Error( 'wpi_option_missing', 'Option not found.' ); }
+        if ( ! $row ) { return new WP_Error( 'pfc_option_missing', 'Option not found.' ); }
         $before = (string) $row['autoload'];
         if ( function_exists( 'wp_set_option_autoload' ) ) {
             $ok = wp_set_option_autoload( $name, (bool) $autoload );
@@ -659,17 +659,17 @@ final class WPI_Database_Repair {
             wp_cache_delete( 'alloptions', 'options' );
             wp_cache_delete( $name, 'options' );
         }
-        if ( ! $ok ) { return new WP_Error( 'wpi_autoload_failed', 'WordPress did not modify the autoload flag.' ); }
+        if ( ! $ok ) { return new WP_Error( 'pfc_autoload_failed', 'WordPress did not modify the autoload flag.' ); }
         self::record_change( 'autoload', $name, $before, $autoload ? 'on' : 'off' );
         return array( 'ok' => true, 'message' => 'Updated autoload for ' . $name . '.', 'bytes' => (int) $row['bytes'] );
     }
 
     private static function repair_core_schema( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm that a current database backup or snapshot has been verified before changing WordPress core schema.' ); }
-        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'wpi_schema_ack', 'Confirm that you reviewed the WordPress core schema changes and understand that ALTER TABLE can rewrite data or indexes.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm that a current database backup or snapshot has been verified before changing WordPress core schema.' ); }
+        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'pfc_schema_ack', 'Confirm that you reviewed the WordPress core schema changes and understand that ALTER TABLE can rewrite data or indexes.' ); }
 
-        $health = WPI_Database_Health::inspect( false, false );
+        $health = PFC_Database_Health::inspect( false, false );
         $missing_columns = (array) ( $health['schema']['missing_core_columns'] ?? array() );
         $missing_indexes = (array) ( $health['schema']['missing_core_indexes'] ?? array() );
         if ( ! $missing_columns && ! $missing_indexes ) { return array( 'ok' => true, 'changed' => 0, 'skipped' => array(), 'message' => 'No missing core columns or indexes were detected.' ); }
@@ -687,7 +687,7 @@ final class WPI_Database_Repair {
             // requires an AUTO_INCREMENT column to be keyed, so add the column and missing
             // PRIMARY KEY atomically in pass 2 when that dependency exists.
             if ( false !== stripos( $definition, 'auto_increment' ) ) {
-                $expected_primary = WPI_Database_Health::expected_core_index_definition( $table, 'PRIMARY' );
+                $expected_primary = PFC_Database_Health::expected_core_index_definition( $table, 'PRIMARY' );
                 $primary_columns = $expected_primary ? self::index_columns_from_definition( $expected_primary ) : array();
                 $missing_primary = false;
                 foreach ( $missing_indexes as $index_item ) {
@@ -713,7 +713,7 @@ final class WPI_Database_Repair {
         }
 
         // Refresh after adding columns so PRIMARY KEY dependency preflights use the live schema.
-        $health = WPI_Database_Health::inspect( false, false );
+        $health = PFC_Database_Health::inspect( false, false );
 
         // Pass 2: add indexes. A missing PRIMARY KEY may depend on correcting a nullable or
         // otherwise drifted core column. Perform those dependent MODIFY clauses in the same
@@ -770,21 +770,21 @@ final class WPI_Database_Repair {
 
     private static function repair_core_column_drift( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm a current database backup/snapshot before correcting a core column.' ); }
-        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'wpi_schema_ack', 'Confirm that you reviewed the schema change and understand MODIFY COLUMN can rewrite or reject existing data.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm a current database backup/snapshot before correcting a core column.' ); }
+        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'pfc_schema_ack', 'Confirm that you reviewed the schema change and understand MODIFY COLUMN can rewrite or reject existing data.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
         $column = self::safe_identifier( (string) ( $args['column'] ?? '' ) );
-        if ( ! $table || ! $column ) { return new WP_Error( 'wpi_schema_target', 'Invalid table or column.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table || ! $column ) { return new WP_Error( 'pfc_schema_target', 'Invalid table or column.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $match = null;
         foreach ( (array) ( $health['schema']['mismatched_core_columns'] ?? array() ) as $item ) {
             if ( $table === (string) ( $item['table'] ?? '' ) && $column === (string) ( $item['column'] ?? '' ) ) { $match = $item; break; }
         }
         if ( ! $match ) { return array( 'ok' => true, 'message' => 'The selected core column no longer differs from the installed WordPress schema.' ); }
         $definition = trim( (string) ( $match['definition'] ?? '' ) );
-        if ( ! self::safe_core_definition( $definition ) ) { return new WP_Error( 'wpi_schema_definition', 'The expected WordPress column definition could not be validated.' ); }
+        if ( ! self::safe_core_definition( $definition ) ) { return new WP_Error( 'pfc_schema_definition', 'The expected WordPress column definition could not be validated.' ); }
         $meta = self::table_meta( $health, $table );
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal browser schema-change threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during a maintenance window.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal browser schema-change threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during a maintenance window.' ); }
         $engine = strtolower( (string) ( $meta['engine'] ?? '' ) );
 
         // Build the complete live-to-core ALTER plan before changing anything. A core column
@@ -797,7 +797,7 @@ final class WPI_Database_Repair {
         $alter_plan = self::core_column_alter_plan( $table, $column, $definition, $health, true );
         if ( is_wp_error( $alter_plan ) ) { return $alter_plan; }
         $sql = (string) ( $alter_plan['sql'] ?? '' );
-        if ( '' === $sql ) { return new WP_Error( 'wpi_schema_plan', 'WPI could not build a safe core-column repair plan.' ); }
+        if ( '' === $sql ) { return new WP_Error( 'pfc_schema_plan', 'Performance Console could not build a safe core-column repair plan.' ); }
         if ( 'innodb' === $engine ) {
             $busy = self::innodb_busy_preflight();
             if ( is_wp_error( $busy ) ) { return $busy; }
@@ -808,12 +808,12 @@ final class WPI_Database_Repair {
             $result_raw = $wpdb->query( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
             $error = $wpdb->last_error;
             $wpdb->suppress_errors( $old );
-            $result = false === $result_raw ? new WP_Error( 'wpi_schema_alter_failed', $error ? sanitize_text_field( $error ) : 'Database rejected the column correction.' ) : true;
+            $result = false === $result_raw ? new WP_Error( 'pfc_schema_alter_failed', $error ? sanitize_text_field( $error ) : 'Database rejected the column correction.' ) : true;
         }
         if ( is_wp_error( $result ) ) { return $result; }
-        $fresh = WPI_Database_Health::inspect( false, false );
+        $fresh = PFC_Database_Health::inspect( false, false );
         foreach ( (array) ( $fresh['schema']['mismatched_core_columns'] ?? array() ) as $item ) {
-            if ( $table === (string) ( $item['table'] ?? '' ) && $column === (string) ( $item['column'] ?? '' ) ) { return new WP_Error( 'wpi_schema_verify', 'ALTER completed, but the column still differs from the installed WordPress schema.' ); }
+            if ( $table === (string) ( $item['table'] ?? '' ) && $column === (string) ( $item['column'] ?? '' ) ) { return new WP_Error( 'pfc_schema_verify', 'ALTER completed, but the column still differs from the installed WordPress schema.' ); }
         }
         self::record_change( 'db_core_column_correction', $table . '.' . $column, wp_json_encode( $match['drift'] ?? array() ), $definition );
         return array( 'ok' => true, 'message' => 'Corrected and verified core column ' . $table . '.' . $column . '.', 'ddl' => $sql );
@@ -821,28 +821,28 @@ final class WPI_Database_Repair {
 
     private static function repair_core_index_drift( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm a current database backup/snapshot before rebuilding a core index.' ); }
-        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'wpi_schema_ack', 'Confirm that you reviewed the index replacement and understand it changes live table schema.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm a current database backup/snapshot before rebuilding a core index.' ); }
+        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'pfc_schema_ack', 'Confirm that you reviewed the index replacement and understand it changes live table schema.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
         $index = self::safe_identifier( (string) ( $args['index'] ?? '' ) );
-        if ( ! $table || ! $index ) { return new WP_Error( 'wpi_schema_target', 'Invalid table or index.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table || ! $index ) { return new WP_Error( 'pfc_schema_target', 'Invalid table or index.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $match = null;
         foreach ( (array) ( $health['schema']['mismatched_core_indexes'] ?? array() ) as $item ) {
             if ( $table === (string) ( $item['table'] ?? '' ) && 0 === strcasecmp( $index, (string) ( $item['index'] ?? '' ) ) ) { $match = $item; break; }
         }
         if ( ! $match ) { return array( 'ok' => true, 'message' => 'The selected core index no longer differs from the installed WordPress schema.' ); }
         $definition = trim( (string) ( $match['definition'] ?? '' ) );
-        if ( ! self::safe_core_definition( $definition ) ) { return new WP_Error( 'wpi_schema_definition', 'The expected WordPress index definition could not be validated.' ); }
+        if ( ! self::safe_core_definition( $definition ) ) { return new WP_Error( 'pfc_schema_definition', 'The expected WordPress index definition could not be validated.' ); }
         $is_primary = 'PRIMARY' === strtoupper( $index ) || 0 === stripos( $definition, 'PRIMARY KEY' );
         $is_unique = $is_primary || 0 === stripos( $definition, 'UNIQUE KEY' );
         if ( $is_unique && ! $is_primary ) {
             $dupes = self::index_has_duplicates( $table, $definition );
             if ( is_wp_error( $dupes ) ) { return $dupes; }
-            if ( $dupes ) { return new WP_Error( 'wpi_unique_duplicates', 'Duplicate values prevent the expected unique index from being created safely.' ); }
+            if ( $dupes ) { return new WP_Error( 'pfc_unique_duplicates', 'Duplicate values prevent the expected unique index from being created safely.' ); }
         }
         $meta = self::table_meta( $health, $table );
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal browser DDL threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal browser DDL threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large.' ); }
 
         if ( $is_primary ) {
             // A PRIMARY KEY replacement must repair prerequisite key columns in the same ALTER.
@@ -866,12 +866,12 @@ final class WPI_Database_Repair {
             $raw = $wpdb->query( $sql ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
             $error = $wpdb->last_error;
             $wpdb->suppress_errors( $old );
-            $result = false === $raw ? new WP_Error( 'wpi_index_alter_failed', $error ? sanitize_text_field( $error ) : 'Database rejected the index replacement.' ) : true;
+            $result = false === $raw ? new WP_Error( 'pfc_index_alter_failed', $error ? sanitize_text_field( $error ) : 'Database rejected the index replacement.' ) : true;
         }
         if ( is_wp_error( $result ) ) { return $result; }
-        $fresh = WPI_Database_Health::inspect( false, false );
+        $fresh = PFC_Database_Health::inspect( false, false );
         foreach ( (array) ( $fresh['schema']['mismatched_core_indexes'] ?? array() ) as $item ) {
-            if ( $table === (string) ( $item['table'] ?? '' ) && 0 === strcasecmp( $index, (string) ( $item['index'] ?? '' ) ) ) { return new WP_Error( 'wpi_index_verify', 'ALTER completed, but the core index still differs from the expected definition.' ); }
+            if ( $table === (string) ( $item['table'] ?? '' ) && 0 === strcasecmp( $index, (string) ( $item['index'] ?? '' ) ) ) { return new WP_Error( 'pfc_index_verify', 'ALTER completed, but the core index still differs from the expected definition.' ); }
         }
         self::record_change( 'db_core_index_correction', $table . '.' . $index, (string) ( $match['actual'] ?? '' ), $definition );
         return array( 'ok' => true, 'message' => 'Rebuilt and verified core index ' . $table . '.' . $index . '.', 'ddl' => $sql );
@@ -879,22 +879,22 @@ final class WPI_Database_Repair {
 
     private static function drop_duplicate_index( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm a current database backup/snapshot before dropping an index.' ); }
-        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'wpi_index_ack', 'Confirm that you reviewed the redundant index names and understand plugin migrations may refer to them by name.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm a current database backup/snapshot before dropping an index.' ); }
+        if ( ! self::danger_confirmed( $args ) ) { return new WP_Error( 'pfc_index_ack', 'Confirm that you reviewed the redundant index names and understand plugin migrations may refer to them by name.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
         $drop = self::safe_identifier( (string) ( $args['index'] ?? '' ) );
         $keep = self::safe_identifier( (string) ( $args['keep_index'] ?? '' ) );
-        if ( ! $table || ! $drop || ! $keep || 'PRIMARY' === strtoupper( $drop ) || 0 === strcasecmp( $drop, $keep ) ) { return new WP_Error( 'wpi_duplicate_index', 'Invalid duplicate-index selection.' ); }
+        if ( ! $table || ! $drop || ! $keep || 'PRIMARY' === strtoupper( $drop ) || 0 === strcasecmp( $drop, $keep ) ) { return new WP_Error( 'pfc_duplicate_index', 'Invalid duplicate-index selection.' ); }
         $drop_rows = self::index_rows( $table, $drop );
         $keep_rows = self::index_rows( $table, $keep );
-        if ( ! $drop_rows || ! $keep_rows || self::index_signature_from_rows( $drop_rows ) !== self::index_signature_from_rows( $keep_rows ) ) { return new WP_Error( 'wpi_duplicate_changed', 'The indexes are no longer exact duplicates. Nothing was dropped.' ); }
+        if ( ! $drop_rows || ! $keep_rows || self::index_signature_from_rows( $drop_rows ) !== self::index_signature_from_rows( $keep_rows ) ) { return new WP_Error( 'pfc_duplicate_changed', 'The indexes are no longer exact duplicates. Nothing was dropped.' ); }
         $managed = self::managed_index_context( $table, array( $drop, $keep ) );
         if ( $managed && ! empty( $managed['preferred_keep'] ) && 0 !== strcasecmp( $keep, (string) $managed['preferred_keep'] ) ) {
-            return new WP_Error( 'wpi_managed_index_keep', 'The selected keep/drop direction no longer matches the active plugin\'s managed-index preference. Refresh the Database Repair Centre before continuing.' );
+            return new WP_Error( 'pfc_managed_index_keep', 'The selected keep/drop direction no longer matches the active plugin\'s managed-index preference. Refresh the Database Repair Centre before continuing.' );
         }
-        $health = WPI_Database_Health::inspect( false, false );
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal browser DDL threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal browser DDL threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large.' ); }
         $sql = 'ALTER TABLE `' . $table . '` DROP INDEX `' . $drop . '`';
         if ( 0 === strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) {
             $busy = self::innodb_busy_preflight(); if ( is_wp_error( $busy ) ) { return $busy; }
@@ -902,46 +902,46 @@ final class WPI_Database_Repair {
             $result = self::execute_online_ddl( $sql );
         } else {
             $old = $wpdb->suppress_errors( true ); $raw = $wpdb->query( $sql ); $error = $wpdb->last_error; $wpdb->suppress_errors( $old ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-            $result = false === $raw ? new WP_Error( 'wpi_drop_index_failed', $error ? sanitize_text_field( $error ) : 'Database rejected the index drop.' ) : true;
+            $result = false === $raw ? new WP_Error( 'pfc_drop_index_failed', $error ? sanitize_text_field( $error ) : 'Database rejected the index drop.' ) : true;
         }
         if ( is_wp_error( $result ) ) { return $result; }
-        if ( self::index_rows( $table, $drop ) || ! self::index_rows( $table, $keep ) ) { return new WP_Error( 'wpi_drop_index_verify', 'Post-change verification failed for the duplicate-index cleanup.' ); }
+        if ( self::index_rows( $table, $drop ) || ! self::index_rows( $table, $keep ) ) { return new WP_Error( 'pfc_drop_index_verify', 'Post-change verification failed for the duplicate-index cleanup.' ); }
         self::record_change( 'db_drop_duplicate_index', $table . '.' . $drop, 'duplicate of ' . $keep, $sql );
         return array( 'ok' => true, 'message' => 'Dropped redundant index ' . $table . '.' . $drop . ' and verified ' . $keep . ' remains.', 'ddl' => $sql );
     }
 
     private static function create_missing_core_table( array $args ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm a current database backup/snapshot before creating a missing core table.' ); }
-        if ( ! self::data_loss_confirmed( $args ) ) { return new WP_Error( 'wpi_data_loss_ack', 'Confirm that you understand creating an empty table restores schema only and does not restore missing records.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm a current database backup/snapshot before creating a missing core table.' ); }
+        if ( ! self::data_loss_confirmed( $args ) ) { return new WP_Error( 'pfc_data_loss_ack', 'Confirm that you understand creating an empty table restores schema only and does not restore missing records.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         if ( ! in_array( $table, (array) ( $health['schema']['missing_core_tables'] ?? array() ), true ) ) { return array( 'ok' => true, 'message' => 'The selected core table is no longer missing.' ); }
         $sql = self::core_create_table_sql( $table );
         if ( is_wp_error( $sql ) ) { return $sql; }
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta( $sql );
         $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
-        if ( $exists !== $table ) { return new WP_Error( 'wpi_create_core_table', 'WordPress dbDelta did not create the missing core table.' ); }
+        if ( $exists !== $table ) { return new WP_Error( 'pfc_create_core_table', 'WordPress dbDelta did not create the missing core table.' ); }
         self::record_change( 'db_create_core_table', $table, 'missing', 'created empty schema from installed WordPress core' );
         return array( 'ok' => true, 'message' => 'Created empty WordPress core table ' . $table . '. Restore any previously lost records from backup if applicable.' );
     }
 
     private static function repair_csv_table( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm a current verified backup/export before CSV repair.' ); }
-        if ( ! self::data_loss_confirmed( $args ) ) { return new WP_Error( 'wpi_data_loss_ack', 'Confirm that CSV repair may discard rows after the first damaged record.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm a current verified backup/export before CSV repair.' ); }
+        if ( ! self::data_loss_confirmed( $args ) ) { return new WP_Error( 'pfc_data_loss_ack', 'Confirm that CSV repair may discard rows after the first damaged record.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta || 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'CSV' ) ) { return new WP_Error( 'wpi_not_csv', 'The selected table is not using the CSV engine.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'CSV table exceeds the normal browser repair threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large.' ); }
+        if ( ! $meta || 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'CSV' ) ) { return new WP_Error( 'pfc_not_csv', 'The selected table is not using the CSV engine.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'CSV table exceeds the normal browser repair threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large.' ); }
         $rows = $wpdb->get_results( 'REPAIR TABLE `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( ! self::table_operation_ok( $rows ) ) { return new WP_Error( 'wpi_csv_repair_failed', 'CSV REPAIR TABLE did not report success.' ); }
+        if ( ! self::table_operation_ok( $rows ) ) { return new WP_Error( 'pfc_csv_repair_failed', 'CSV REPAIR TABLE did not report success.' ); }
         $check = $wpdb->get_results( 'CHECK TABLE `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( ! self::table_operation_ok( $check ) ) { return new WP_Error( 'wpi_csv_verify_failed', 'CSV repair completed but CHECK TABLE still reports a problem.' ); }
+        if ( ! self::table_operation_ok( $check ) ) { return new WP_Error( 'pfc_csv_verify_failed', 'CSV repair completed but CHECK TABLE still reports a problem.' ); }
         self::record_change( 'db_repair_csv', $table, '', 'REPAIR TABLE' );
         return array( 'ok' => true, 'message' => 'CSV table repair completed and passed CHECK TABLE. Compare row counts with the verified export/backup.', 'rows' => $rows );
     }
@@ -949,92 +949,92 @@ final class WPI_Database_Repair {
     private static function check_table( array $args, $force_large ) {
         global $wpdb;
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta ) { return new WP_Error( 'wpi_table_missing', 'Table was not found.' ); }
+        if ( ! $meta ) { return new WP_Error( 'pfc_table_missing', 'Table was not found.' ); }
         $engine = strtolower( (string) ( $meta['engine'] ?? '' ) );
         $caps = self::engine_capabilities_for_health( $health, $engine );
-        if ( empty( $caps['check'] ) ) { return new WP_Error( 'wpi_check_engine', 'WPI does not have a verified CHECK TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the web integrity-check threshold. Use a deep CLI scan with --force-large if intentional.' ); }
+        if ( empty( $caps['check'] ) ) { return new WP_Error( 'pfc_check_engine', 'Performance Console does not have a verified CHECK TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the web integrity-check threshold. Use a deep CLI scan with --force-large if intentional.' ); }
         $old = $wpdb->suppress_errors( true );
         $rows = $wpdb->get_results( "CHECK TABLE `{$table}`", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $error = $wpdb->last_error;
         $wpdb->suppress_errors( $old );
-        if ( ! $rows ) { return new WP_Error( 'wpi_check_failed', $error ? sanitize_text_field( $error ) : 'Database did not return a CHECK TABLE result.' ); }
+        if ( ! $rows ) { return new WP_Error( 'pfc_check_failed', $error ? sanitize_text_field( $error ) : 'Database did not return a CHECK TABLE result.' ); }
         $ok = self::table_operation_ok( $rows );
         return array( 'ok' => $ok, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => $ok ? 'Integrity check completed for ' . $table . ' (' . $meta['engine'] . ').' : 'Integrity check reported a problem for ' . $table . ' (' . $meta['engine'] . ').' );
     }
 
     private static function repair_table( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm that a current database backup or snapshot has been verified before repairing a table.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm that a current database backup or snapshot has been verified before repairing a table.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta ) { return new WP_Error( 'wpi_table_missing', 'Table was not found.' ); }
+        if ( ! $meta ) { return new WP_Error( 'pfc_table_missing', 'Table was not found.' ); }
         $engine = strtolower( (string) ( $meta['engine'] ?? '' ) );
         $caps = self::engine_capabilities_for_health( $health, $engine );
-        if ( 'innodb' === $engine ) { return new WP_Error( 'wpi_repair_innodb', 'InnoDB does not support REPAIR TABLE. Use CHECK TABLE plus InnoDB status/error logs, then recover with backup/rebuild/engine recovery tooling as appropriate.' ); }
-        if ( 'csv' === $engine ) { return new WP_Error( 'wpi_repair_csv', 'CSV repair can discard rows after the first damaged record, so WPI will not run it automatically. Export/backup the file/table and perform a deliberate recovery instead.' ); }
-        if ( empty( $caps['repair'] ) ) { return new WP_Error( 'wpi_repair_engine', 'WPI does not have a verified automatic REPAIR TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal web repair safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during maintenance.' ); }
+        if ( 'innodb' === $engine ) { return new WP_Error( 'pfc_repair_innodb', 'InnoDB does not support REPAIR TABLE. Use CHECK TABLE plus InnoDB status/error logs, then recover with backup/rebuild/engine recovery tooling as appropriate.' ); }
+        if ( 'csv' === $engine ) { return new WP_Error( 'pfc_repair_csv', 'CSV repair can discard rows after the first damaged record, so Performance Console will not run it automatically. Export/backup the file/table and perform a deliberate recovery instead.' ); }
+        if ( empty( $caps['repair'] ) ) { return new WP_Error( 'pfc_repair_engine', 'Performance Console does not have a verified automatic REPAIR TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal web repair safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during maintenance.' ); }
         $suffix = in_array( $engine, array( 'myisam', 'aria' ), true ) ? ' QUICK' : '';
         $rows = $wpdb->get_results( "REPAIR TABLE `{$table}`{$suffix}", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $ok = self::table_operation_ok( $rows );
         if ( $ok ) { self::record_change( 'db_repair_table', $table, '', 'REPAIR TABLE' . $suffix . ' (' . $meta['engine'] . ')' ); }
-        return $ok ? array( 'ok' => true, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => 'Database repair completed for ' . $table . ' (' . $meta['engine'] . ').' ) : new WP_Error( 'wpi_repair_failed', 'Database did not report a successful ' . $meta['engine'] . ' table repair.' );
+        return $ok ? array( 'ok' => true, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => 'Database repair completed for ' . $table . ' (' . $meta['engine'] . ').' ) : new WP_Error( 'pfc_repair_failed', 'Database did not report a successful ' . $meta['engine'] . ' table repair.' );
     }
 
     private static function optimize_table( array $args, $force_large ) {
         global $wpdb;
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm that a current database backup or snapshot has been verified before optimizing/rebuilding a table.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm that a current database backup or snapshot has been verified before optimizing/rebuilding a table.' ); }
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta ) { return new WP_Error( 'wpi_table_missing', 'Table was not found.' ); }
+        if ( ! $meta ) { return new WP_Error( 'pfc_table_missing', 'Table was not found.' ); }
         $engine = strtolower( (string) ( $meta['engine'] ?? '' ) );
         $caps = self::engine_capabilities_for_health( $health, $engine );
-        if ( empty( $caps['optimize'] ) ) { return new WP_Error( 'wpi_optimize_engine', 'WPI does not have a verified OPTIMIZE TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal web optimize safety threshold. Use the guided Maintenance Fix workflow, host/DBA tooling, or WP-CLI with --force-large.' ); }
+        if ( empty( $caps['optimize'] ) ) { return new WP_Error( 'pfc_optimize_engine', 'Performance Console does not have a verified OPTIMIZE TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal web optimize safety threshold. Use the guided Maintenance Fix workflow, host/DBA tooling, or WP-CLI with --force-large.' ); }
         $rows = $wpdb->get_results( "OPTIMIZE TABLE `{$table}`", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $ok = self::table_operation_ok( $rows );
         if ( $ok ) { self::record_change( 'db_optimize_table', $table, '', 'OPTIMIZE TABLE (' . $meta['engine'] . ')' ); }
-        return $ok ? array( 'ok' => true, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => 'Database optimize/rebuild completed for ' . $table . ' (' . $meta['engine'] . ').' ) : new WP_Error( 'wpi_optimize_failed', 'Database did not report a successful optimize operation for ' . $meta['engine'] . '.' );
+        return $ok ? array( 'ok' => true, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => 'Database optimize/rebuild completed for ' . $table . ' (' . $meta['engine'] . ').' ) : new WP_Error( 'pfc_optimize_failed', 'Database did not report a successful optimize operation for ' . $meta['engine'] . '.' );
     }
 
     private static function analyze_table( array $args, $force_large ) {
         global $wpdb;
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta ) { return new WP_Error( 'wpi_table_missing', 'Table was not found.' ); }
+        if ( ! $meta ) { return new WP_Error( 'pfc_table_missing', 'Table was not found.' ); }
         $engine = strtolower( (string) ( $meta['engine'] ?? '' ) );
         $caps = self::engine_capabilities_for_health( $health, $engine );
-        if ( empty( $caps['analyze'] ) ) { return new WP_Error( 'wpi_analyze_engine', 'WPI does not have a verified ANALYZE TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal web analyze safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large if intentional.' ); }
+        if ( empty( $caps['analyze'] ) ) { return new WP_Error( 'pfc_analyze_engine', 'Performance Console does not have a verified ANALYZE TABLE path for the ' . ( $meta['engine'] ?? $engine ) . ' storage engine.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal web analyze safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large if intentional.' ); }
         $rows = $wpdb->get_results( "ANALYZE TABLE `{$table}`", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $ok = self::table_operation_ok( $rows );
         if ( $ok ) { self::record_change( 'db_analyze_table', $table, '', 'ANALYZE TABLE (' . $meta['engine'] . ')' ); }
-        return $ok ? array( 'ok' => true, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => 'Database statistics refreshed for ' . $table . ' (' . $meta['engine'] . ').' ) : new WP_Error( 'wpi_analyze_failed', 'Database did not report a successful analyze operation for ' . $meta['engine'] . '.' );
+        return $ok ? array( 'ok' => true, 'rows' => $rows, 'engine' => $meta['engine'], 'message' => 'Database statistics refreshed for ' . $table . ' (' . $meta['engine'] . ').' ) : new WP_Error( 'pfc_analyze_failed', 'Database did not report a successful analyze operation for ' . $meta['engine'] . '.' );
     }
 
     private static function innodb_recovery_preflight( array $args, $force_large = false ) {
         global $wpdb;
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta ) { return new WP_Error( 'wpi_table_missing', 'Table was not found.' ); }
-        if ( 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) { return new WP_Error( 'wpi_not_innodb', 'Guided InnoDB recovery is only available for InnoDB tables.' ); }
+        if ( ! $meta ) { return new WP_Error( 'pfc_table_missing', 'Table was not found.' ); }
+        if ( 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) { return new WP_Error( 'pfc_not_innodb', 'Guided InnoDB recovery is only available for InnoDB tables.' ); }
 
         $check = self::check_table( array( 'table' => $table ), $force_large );
         $indexes = self::index_inventory( $table );
-        $runtime = WPI_Database_Health::innodb_runtime();
-        $ddl = WPI_Database_Health::online_ddl_capabilities( $wpdb->db_version(), (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' ) );
+        $runtime = PFC_Database_Health::innodb_runtime();
+        $ddl = PFC_Database_Health::online_ddl_capabilities( $wpdb->db_version(), (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' ) );
         $disk_index = self::disk_space_preflight( $meta, 'index' );
         $disk_table = self::disk_space_preflight( $meta, 'table' );
 
@@ -1047,7 +1047,7 @@ final class WPI_Database_Repair {
 
         $warnings = array();
         if ( self::is_large_meta( $meta ) && ! $force_large ) { $warnings[] = 'The table exceeds the normal wp-admin DDL threshold. Mutating rebuild operations require the guarded maintenance-window workflow or WP-CLI.'; }
-        if ( empty( $ddl['inplace'] ) ) { $warnings[] = 'WPI cannot verify an online INPLACE/LOCK=NONE path for this database version, so it will not offer an automatic InnoDB rebuild.'; }
+        if ( empty( $ddl['inplace'] ) ) { $warnings[] = 'Performance Console cannot verify an online INPLACE/LOCK=NONE path for this database version, so it will not offer an automatic InnoDB rebuild.'; }
         if ( ! empty( $runtime['lock_graph']['edges'] ) ) { $warnings[] = 'Active InnoDB lock waits are visible. Resolve blockers before attempting DDL.'; }
         foreach ( (array) ( $runtime['transactions'] ?? array() ) as $trx ) {
             if ( (int) ( $trx['age_seconds'] ?? 0 ) >= 30 ) { $warnings[] = 'A transaction has been open for at least 30 seconds. Resolve long transactions before DDL to reduce metadata-lock risk.'; break; }
@@ -1103,21 +1103,21 @@ final class WPI_Database_Repair {
         global $wpdb;
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
         $index = self::safe_identifier( (string) ( $args['index'] ?? '' ) );
-        if ( ! $table || ! $index || 'PRIMARY' === strtoupper( $index ) ) { return new WP_Error( 'wpi_index', 'A valid non-primary index is required.' ); }
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm that a current database backup or snapshot has been verified before rebuilding an InnoDB index.' ); }
+        if ( ! $table || ! $index || 'PRIMARY' === strtoupper( $index ) ) { return new WP_Error( 'pfc_index', 'A valid non-primary index is required.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm that a current database backup or snapshot has been verified before rebuilding an InnoDB index.' ); }
 
-        $health = WPI_Database_Health::inspect( false, false );
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta || 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) { return new WP_Error( 'wpi_not_innodb', 'The selected table is not an InnoDB table.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal wp-admin DDL safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during a maintenance window.' ); }
+        if ( ! $meta || 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) { return new WP_Error( 'pfc_not_innodb', 'The selected table is not an InnoDB table.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal wp-admin DDL safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during a maintenance window.' ); }
         $force_recovery = (int) ( $health['server']['variables']['innodb_force_recovery'] ?? 0 );
-        if ( $force_recovery > 0 ) { return new WP_Error( 'wpi_force_recovery', 'The server is running with innodb_force_recovery enabled. Normal index rebuilds are blocked.' ); }
-        $ddl = WPI_Database_Health::online_ddl_capabilities( $wpdb->db_version(), (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' ) );
-        if ( empty( $ddl['inplace'] ) || empty( $ddl['lock_none'] ) ) { return new WP_Error( 'wpi_online_ddl', 'WPI cannot verify ALGORITHM=INPLACE, LOCK=NONE support for this database version and will not fall back to a blocking copy.' ); }
+        if ( $force_recovery > 0 ) { return new WP_Error( 'pfc_force_recovery', 'The server is running with innodb_force_recovery enabled. Normal index rebuilds are blocked.' ); }
+        $ddl = PFC_Database_Health::online_ddl_capabilities( $wpdb->db_version(), (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' ) );
+        if ( empty( $ddl['inplace'] ) || empty( $ddl['lock_none'] ) ) { return new WP_Error( 'pfc_online_ddl', 'Performance Console cannot verify ALGORITHM=INPLACE, LOCK=NONE support for this database version and will not fall back to a blocking copy.' ); }
         $definition = self::build_index_definition( $table, $index );
         if ( is_wp_error( $definition ) ) { return $definition; }
         $disk = self::disk_space_preflight( $meta, 'index' );
-        if ( ! empty( $disk['available'] ) && empty( $disk['ok'] ) ) { return new WP_Error( 'wpi_disk_space', 'Estimated free disk space is insufficient for the index rebuild safety margin.' ); }
+        if ( ! empty( $disk['available'] ) && empty( $disk['ok'] ) ) { return new WP_Error( 'pfc_disk_space', 'Estimated free disk space is insufficient for the index rebuild safety margin.' ); }
         $busy = self::innodb_busy_preflight();
         if ( is_wp_error( $busy ) ) { return $busy; }
 
@@ -1141,17 +1141,17 @@ final class WPI_Database_Repair {
     private static function rebuild_innodb_table( array $args, $force_large ) {
         global $wpdb;
         $table = self::safe_table( (string) ( $args['table'] ?? '' ) );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
-        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'wpi_backup_required', 'Confirm that a current database backup or snapshot has been verified before rebuilding an InnoDB table.' ); }
-        $health = WPI_Database_Health::inspect( false, false );
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
+        if ( ! self::backup_confirmed( $args ) ) { return new WP_Error( 'pfc_backup_required', 'Confirm that a current database backup or snapshot has been verified before rebuilding an InnoDB table.' ); }
+        $health = PFC_Database_Health::inspect( false, false );
         $meta = self::table_meta( $health, $table );
-        if ( ! $meta || 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) { return new WP_Error( 'wpi_not_innodb', 'The selected table is not an InnoDB table.' ); }
-        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'wpi_large_table', 'Table exceeds the normal wp-admin DDL safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during a maintenance window.' ); }
-        if ( (int) ( $health['server']['variables']['innodb_force_recovery'] ?? 0 ) > 0 ) { return new WP_Error( 'wpi_force_recovery', 'The server is running with innodb_force_recovery enabled. Normal table rebuilds are blocked.' ); }
-        $ddl = WPI_Database_Health::online_ddl_capabilities( $wpdb->db_version(), (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' ) );
-        if ( empty( $ddl['inplace'] ) || empty( $ddl['lock_none'] ) ) { return new WP_Error( 'wpi_online_ddl', 'WPI cannot verify an online INPLACE/LOCK=NONE rebuild path for this database version.' ); }
+        if ( ! $meta || 0 !== strcasecmp( (string) ( $meta['engine'] ?? '' ), 'InnoDB' ) ) { return new WP_Error( 'pfc_not_innodb', 'The selected table is not an InnoDB table.' ); }
+        if ( self::is_large_meta( $meta ) && ! $force_large ) { return new WP_Error( 'pfc_large_table', 'Table exceeds the normal wp-admin DDL safety threshold. Use the guided Maintenance Fix workflow or WP-CLI with --force-large during a maintenance window.' ); }
+        if ( (int) ( $health['server']['variables']['innodb_force_recovery'] ?? 0 ) > 0 ) { return new WP_Error( 'pfc_force_recovery', 'The server is running with innodb_force_recovery enabled. Normal table rebuilds are blocked.' ); }
+        $ddl = PFC_Database_Health::online_ddl_capabilities( $wpdb->db_version(), (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' ) );
+        if ( empty( $ddl['inplace'] ) || empty( $ddl['lock_none'] ) ) { return new WP_Error( 'pfc_online_ddl', 'Performance Console cannot verify an online INPLACE/LOCK=NONE rebuild path for this database version.' ); }
         $disk = self::disk_space_preflight( $meta, 'table' );
-        if ( ! empty( $disk['available'] ) && empty( $disk['ok'] ) ) { return new WP_Error( 'wpi_disk_space', 'Estimated free disk space is insufficient for the table rebuild safety margin.' ); }
+        if ( ! empty( $disk['available'] ) && empty( $disk['ok'] ) ) { return new WP_Error( 'pfc_disk_space', 'Estimated free disk space is insufficient for the table rebuild safety margin.' ); }
         $busy = self::innodb_busy_preflight();
         if ( is_wp_error( $busy ) ) { return $busy; }
 
@@ -1174,26 +1174,26 @@ final class WPI_Database_Repair {
     private static function build_index_definition( $table, $index ) {
         global $wpdb;
         $rows = self::index_rows( $table, $index );
-        if ( ! $rows ) { return new WP_Error( 'wpi_index_missing', 'Index metadata could not be read.' ); }
+        if ( ! $rows ) { return new WP_Error( 'pfc_index_missing', 'Index metadata could not be read.' ); }
         $type = strtoupper( (string) ( $rows[0]['Index_type'] ?? '' ) );
-        if ( 'BTREE' !== $type ) { return new WP_Error( 'wpi_index_type', 'WPI only automatically rebuilds ordinary BTREE secondary indexes. FULLTEXT, SPATIAL, HASH and engine-specific indexes require manual review.' ); }
-        if ( isset( $rows[0]['Visible'] ) && 'NO' === strtoupper( (string) $rows[0]['Visible'] ) ) { return new WP_Error( 'wpi_invisible_index', 'Invisible indexes require manual rebuild so visibility semantics are preserved deliberately.' ); }
-        if ( isset( $rows[0]['Ignored'] ) && 'YES' === strtoupper( (string) $rows[0]['Ignored'] ) ) { return new WP_Error( 'wpi_ignored_index', 'Ignored MariaDB indexes require manual rebuild so ignored-index semantics are preserved deliberately.' ); }
+        if ( 'BTREE' !== $type ) { return new WP_Error( 'pfc_index_type', 'Performance Console only automatically rebuilds ordinary BTREE secondary indexes. FULLTEXT, SPATIAL, HASH and engine-specific indexes require manual review.' ); }
+        if ( isset( $rows[0]['Visible'] ) && 'NO' === strtoupper( (string) $rows[0]['Visible'] ) ) { return new WP_Error( 'pfc_invisible_index', 'Invisible indexes require manual rebuild so visibility semantics are preserved deliberately.' ); }
+        if ( isset( $rows[0]['Ignored'] ) && 'YES' === strtoupper( (string) $rows[0]['Ignored'] ) ) { return new WP_Error( 'pfc_ignored_index', 'Ignored MariaDB indexes require manual rebuild so ignored-index semantics are preserved deliberately.' ); }
         $parts = array();
         foreach ( $rows as $row ) {
-            if ( ! empty( $row['Expression'] ) || empty( $row['Column_name'] ) ) { return new WP_Error( 'wpi_functional_index', 'Functional/expression indexes require manual review.' ); }
+            if ( ! empty( $row['Expression'] ) || empty( $row['Column_name'] ) ) { return new WP_Error( 'pfc_functional_index', 'Functional/expression indexes require manual review.' ); }
             $column = self::safe_identifier( (string) $row['Column_name'] );
-            if ( ! $column ) { return new WP_Error( 'wpi_index_column', 'Index contains an unsafe or unsupported column identifier.' ); }
+            if ( ! $column ) { return new WP_Error( 'pfc_index_column', 'Index contains an unsafe or unsupported column identifier.' ); }
             $part = '`' . $column . '`';
             if ( ! empty( $row['Sub_part'] ) ) { $part .= '(' . absint( $row['Sub_part'] ) . ')'; }
             if ( 'D' === strtoupper( (string) ( $row['Collation'] ?? '' ) ) ) { $part .= ' DESC'; }
             $parts[] = $part;
         }
-        if ( ! $parts ) { return new WP_Error( 'wpi_index_columns', 'No index columns were found.' ); }
+        if ( ! $parts ) { return new WP_Error( 'pfc_index_columns', 'No index columns were found.' ); }
         if ( empty( $rows[0]['Non_unique'] ) ) {
             $dup = self::index_columns_have_duplicates( $table, $rows );
             if ( is_wp_error( $dup ) ) { return $dup; }
-            if ( $dup ) { return new WP_Error( 'wpi_unique_duplicates', 'Duplicate values were detected for this unique index, so WPI will not rebuild it automatically.' ); }
+            if ( $dup ) { return new WP_Error( 'pfc_unique_duplicates', 'Duplicate values were detected for this unique index, so Performance Console will not rebuild it automatically.' ); }
         }
         return ( empty( $rows[0]['Non_unique'] ) ? 'UNIQUE ' : '' ) . 'INDEX `' . $index . '` (' . implode( ',', $parts ) . ')';
     }
@@ -1231,16 +1231,16 @@ final class WPI_Database_Repair {
         $columns = array();
         foreach ( $rows as $row ) {
             $column = self::safe_identifier( (string) ( $row['Column_name'] ?? '' ) );
-            if ( ! $column ) { return new WP_Error( 'wpi_index_column', 'Unable to preflight unique index columns.' ); }
+            if ( ! $column ) { return new WP_Error( 'pfc_index_column', 'Unable to preflight unique index columns.' ); }
             if ( ! empty( $row['Sub_part'] ) ) { $columns[] = 'LEFT(`' . $column . '`,' . absint( $row['Sub_part'] ) . ')'; }
             else { $columns[] = '`' . $column . '`'; }
         }
-        if ( ! $columns ) { return new WP_Error( 'wpi_index_column', 'Unable to preflight unique index columns.' ); }
+        if ( ! $columns ) { return new WP_Error( 'pfc_index_column', 'Unable to preflight unique index columns.' ); }
         $old = $wpdb->suppress_errors( true );
         $duplicate = $wpdb->get_var( 'SELECT 1 FROM `' . $table . '` GROUP BY ' . implode( ',', $columns ) . ' HAVING COUNT(*)>1 LIMIT 1' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $error = $wpdb->last_error;
         $wpdb->suppress_errors( $old );
-        if ( $error ) { return new WP_Error( 'wpi_unique_preflight', sanitize_text_field( $error ) ); }
+        if ( $error ) { return new WP_Error( 'pfc_unique_preflight', sanitize_text_field( $error ) ); }
         return null !== $duplicate;
     }
 
@@ -1276,7 +1276,7 @@ final class WPI_Database_Repair {
         $snapshot = self::transaction_manager_snapshot();
         if ( ! empty( $snapshot['lock_graph']['edges'] ) ) {
             return new WP_Error(
-                'wpi_innodb_busy',
+                'pfc_innodb_busy',
                 'Active InnoDB lock waits are visible. Use Performance → InnoDB Transaction Manager to inspect and, when appropriate, terminate the blocking connection before retrying DDL.',
                 array( 'transaction_manager' => $snapshot )
             );
@@ -1285,7 +1285,7 @@ final class WPI_Database_Repair {
             if ( ! empty( $trx['is_current_connection'] ) ) { continue; }
             if ( (int) ( $trx['age_seconds'] ?? 0 ) >= 30 ) {
                 return new WP_Error(
-                    'wpi_innodb_busy',
+                    'pfc_innodb_busy',
                     'A long-running InnoDB transaction is open. Use Performance → InnoDB Transaction Manager to inspect it and safely terminate a stuck/idle connection before retrying DDL.',
                     array( 'transaction_manager' => $snapshot, 'blocking_transaction' => $trx )
                 );
@@ -1303,25 +1303,25 @@ final class WPI_Database_Repair {
         $error = $wpdb->last_error;
         if ( null !== $old_timeout && is_numeric( $old_timeout ) ) { $wpdb->query( 'SET SESSION lock_wait_timeout=' . absint( $old_timeout ) ); }
         $wpdb->suppress_errors( $old_errors );
-        if ( false === $result ) { return new WP_Error( 'wpi_online_ddl_failed', $error ? sanitize_text_field( $error ) : 'The database rejected the online DDL operation. WPI did not retry with a more blocking algorithm.' ); }
+        if ( false === $result ) { return new WP_Error( 'pfc_online_ddl_failed', $error ? sanitize_text_field( $error ) : 'The database rejected the online DDL operation. Performance Console did not retry with a more blocking algorithm.' ); }
         return true;
     }
 
     private static function post_repair_verify( $table, $index = '' ) {
         global $wpdb;
         $check = $wpdb->get_results( 'CHECK TABLE `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( ! self::table_operation_ok( $check ) ) { return new WP_Error( 'wpi_post_check', 'The DDL completed, but CHECK TABLE did not report a clean result. Stop and investigate before further changes.' ); }
+        if ( ! self::table_operation_ok( $check ) ) { return new WP_Error( 'pfc_post_check', 'The DDL completed, but CHECK TABLE did not report a clean result. Stop and investigate before further changes.' ); }
         $analyze = $wpdb->get_results( 'ANALYZE TABLE `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
-        if ( ! self::table_operation_ok( $analyze ) ) { return new WP_Error( 'wpi_post_analyze', 'The table passed CHECK TABLE, but ANALYZE TABLE did not report success.' ); }
+        if ( ! self::table_operation_ok( $analyze ) ) { return new WP_Error( 'pfc_post_analyze', 'The table passed CHECK TABLE, but ANALYZE TABLE did not report success.' ); }
         $index_ok = true;
         if ( $index ) { $index_ok = ! empty( self::index_rows( $table, $index ) ); }
-        if ( ! $index_ok ) { return new WP_Error( 'wpi_post_index', 'Post-repair verification could not find the rebuilt index.' ); }
+        if ( ! $index_ok ) { return new WP_Error( 'pfc_post_index', 'Post-repair verification could not find the rebuilt index.' ); }
         return array( 'ok' => true, 'check' => $check, 'analyze' => $analyze, 'index_present' => $index_ok );
     }
 
     private static function backup_confirmed( array $args ) {
         $backup_id = absint( $args['backup_id'] ?? 0 );
-        if ( $backup_id && class_exists( 'WPI_Database_Backup' ) && WPI_Database_Backup::is_verified_recent( $backup_id ) ) { return true; }
+        if ( $backup_id && class_exists( 'PFC_Database_Backup' ) && PFC_Database_Backup::is_verified_recent( $backup_id ) ) { return true; }
         $value = strtolower( trim( (string) ( $args['backup_confirmed'] ?? '' ) ) );
         return in_array( $value, array( '1','yes','true','on' ), true );
     }
@@ -1337,14 +1337,14 @@ final class WPI_Database_Repair {
 
     private static function core_create_table_sql( $table ) {
         $table = self::safe_table( $table );
-        if ( ! $table ) { return new WP_Error( 'wpi_table', 'Invalid table.' ); }
+        if ( ! $table ) { return new WP_Error( 'pfc_table', 'Invalid table.' ); }
         require_once ABSPATH . 'wp-admin/includes/schema.php';
         $schema = function_exists( 'wp_get_db_schema' ) ? wp_get_db_schema( 'all' ) : '';
-        if ( ! is_string( $schema ) || '' === $schema ) { return new WP_Error( 'wpi_core_schema', 'WordPress core schema could not be loaded.' ); }
+        if ( ! is_string( $schema ) || '' === $schema ) { return new WP_Error( 'pfc_core_schema', 'WordPress core schema could not be loaded.' ); }
         $pattern = '/CREATE TABLE\s+`?' . preg_quote( $table, '/' ) . '`?\s*\(.*?\)\s*[^;]*;/si';
-        if ( ! preg_match( $pattern, $schema, $match ) ) { return new WP_Error( 'wpi_core_table_schema', 'The installed WordPress schema does not contain a CREATE TABLE statement for the requested table.' ); }
+        if ( ! preg_match( $pattern, $schema, $match ) ) { return new WP_Error( 'pfc_core_table_schema', 'The installed WordPress schema does not contain a CREATE TABLE statement for the requested table.' ); }
         $sql = trim( (string) $match[0] );
-        if ( false !== strpos( $sql, '--' ) || false !== strpos( $sql, '/*' ) ) { return new WP_Error( 'wpi_core_table_schema', 'Core table schema failed safety validation.' ); }
+        if ( false !== strpos( $sql, '--' ) || false !== strpos( $sql, '/*' ) ) { return new WP_Error( 'pfc_core_table_schema', 'Core table schema failed safety validation.' ); }
         return $sql;
     }
 
@@ -1368,29 +1368,29 @@ final class WPI_Database_Repair {
     private static function rollback_change( array $args ) {
         global $wpdb;
         $id = absint( $args['change_id'] ?? 0 );
-        if ( ! $id ) { return new WP_Error( 'wpi_change_id', 'A valid change ID is required.' ); }
-        $table = WPI_Utils::table( 'changes' );
+        if ( ! $id ) { return new WP_Error( 'pfc_change_id', 'A valid change ID is required.' ); }
+        $table = PFC_Utils::table( 'changes' );
         $change = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", $id ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        if ( ! $change ) { return new WP_Error( 'wpi_change_missing', 'Change record not found.' ); }
-        if ( ! empty( $change['reverted_at'] ) ) { return new WP_Error( 'wpi_already_reverted', 'This change has already been reverted.' ); }
+        if ( ! $change ) { return new WP_Error( 'pfc_change_missing', 'Change record not found.' ); }
+        if ( ! empty( $change['reverted_at'] ) ) { return new WP_Error( 'pfc_already_reverted', 'This change has already been reverted.' ); }
 
         if ( 'autoload' === $change['change_type'] ) {
             $allowed = array( 'yes','no','on','off','auto','auto-on','auto-off' );
             $before = (string) $change['before_value'];
-            if ( ! in_array( $before, $allowed, true ) ) { return new WP_Error( 'wpi_autoload_rollback', 'Original autoload value is not recognized.' ); }
+            if ( ! in_array( $before, $allowed, true ) ) { return new WP_Error( 'pfc_autoload_rollback', 'Original autoload value is not recognized.' ); }
             $ok = false !== $wpdb->update( $wpdb->options, array( 'autoload' => $before ), array( 'option_name' => $change['object_name'] ) );
-            if ( ! $ok ) { return new WP_Error( 'wpi_autoload_rollback', 'Unable to restore the original autoload value.' ); }
+            if ( ! $ok ) { return new WP_Error( 'pfc_autoload_rollback', 'Unable to restore the original autoload value.' ); }
             wp_cache_delete( 'alloptions', 'options' );
             wp_cache_delete( $change['object_name'], 'options' );
-            $wpdb->update( $table, array( 'reverted_at' => WPI_Utils::now_mysql() ), array( 'id' => $id ) );
+            $wpdb->update( $table, array( 'reverted_at' => PFC_Utils::now_mysql() ), array( 'id' => $id ) );
             return array( 'ok' => true, 'message' => 'Restored the original autoload value for ' . $change['object_name'] . '.' );
         }
 
         if ( 'db_cleanup_orphans' === $change['change_type'] ) {
             $backup = json_decode( (string) $change['before_value'], true );
-            if ( ! is_array( $backup ) || empty( $backup['table'] ) || empty( $backup['rows'] ) || ! is_array( $backup['rows'] ) ) { return new WP_Error( 'wpi_backup_invalid', 'The rollback snapshot is missing or invalid.' ); }
+            if ( ! is_array( $backup ) || empty( $backup['table'] ) || empty( $backup['rows'] ) || ! is_array( $backup['rows'] ) ) { return new WP_Error( 'pfc_backup_invalid', 'The rollback snapshot is missing or invalid.' ); }
             $target = self::safe_table( $backup['table'] );
-            if ( ! $target ) { return new WP_Error( 'wpi_backup_table', 'The rollback table identifier is invalid.' ); }
+            if ( ! $target ) { return new WP_Error( 'pfc_backup_table', 'The rollback table identifier is invalid.' ); }
             $columns = $wpdb->get_col( "SHOW COLUMNS FROM `{$target}`", 0 ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
             $allowed_columns = array_fill_keys( array_map( 'strval', (array) $columns ), true );
             $inserted = 0; $errors = array();
@@ -1402,17 +1402,17 @@ final class WPI_Database_Repair {
                 if ( false === $result ) { $errors[] = sanitize_text_field( $wpdb->last_error ); break; }
                 $inserted++;
             }
-            if ( $errors ) { return new WP_Error( 'wpi_rollback_partial', 'Rollback stopped after restoring ' . $inserted . ' row(s): ' . $errors[0] ); }
-            $wpdb->update( $table, array( 'reverted_at' => WPI_Utils::now_mysql() ), array( 'id' => $id ) );
+            if ( $errors ) { return new WP_Error( 'pfc_rollback_partial', 'Rollback stopped after restoring ' . $inserted . ' row(s): ' . $errors[0] ); }
+            $wpdb->update( $table, array( 'reverted_at' => PFC_Utils::now_mysql() ), array( 'id' => $id ) );
             return array( 'ok' => true, 'restored' => $inserted, 'message' => 'Restored ' . $inserted . ' row(s) from the bounded orphan-cleanup snapshot.' );
         }
-        return new WP_Error( 'wpi_not_reversible', 'This change type is intentionally not reversible automatically.' );
+        return new WP_Error( 'pfc_not_reversible', 'This change type is intentionally not reversible automatically.' );
     }
 
     private static function encode_backup( $table, array $rows ) {
         $payload = wp_json_encode( array( 'table' => (string) $table, 'rows' => $rows ) );
-        if ( ! is_string( $payload ) ) { return new WP_Error( 'wpi_backup_encode', 'Unable to encode rollback data.' ); }
-        if ( strlen( $payload ) > self::MAX_BACKUP_BYTES ) { return new WP_Error( 'wpi_backup_too_large', 'This cleanup batch would require a rollback snapshot larger than 2 MiB. Reduce the batch size or use an external database backup/maintenance workflow.' ); }
+        if ( ! is_string( $payload ) ) { return new WP_Error( 'pfc_backup_encode', 'Unable to encode rollback data.' ); }
+        if ( strlen( $payload ) > self::MAX_BACKUP_BYTES ) { return new WP_Error( 'pfc_backup_too_large', 'This cleanup batch would require a rollback snapshot larger than 2 MiB. Reduce the batch size or use an external database backup/maintenance workflow.' ); }
         return $payload;
     }
 
@@ -1431,11 +1431,11 @@ final class WPI_Database_Repair {
 
     /**
      * Resolve ownership and keep priority for an exact duplicate-index group.
-     * Plugins can register canonical names and legacy aliases without making WPI
+     * Plugins can register canonical names and legacy aliases without making Performance Console
      * depend on plugin-specific code.
      */
     private static function managed_index_context( $table, array $names ) {
-        $registry = apply_filters( 'wpi_managed_database_indexes', array() );
+        $registry = apply_filters( 'pfc_managed_database_indexes', array() );
         if ( ! is_array( $registry ) ) { return null; }
         foreach ( $registry as $item ) {
             if ( ! is_array( $item ) || 0 !== strcasecmp( (string) ( $item['table'] ?? '' ), (string) $table ) ) { continue; }
@@ -1470,7 +1470,7 @@ final class WPI_Database_Repair {
         $family = (string) ( $health['server']['storage_engines']['family'] ?? 'mysql' );
         $key = strtolower( (string) $engine );
         $live = (array) ( $health['server']['storage_engines']['engines'][ $key ]['capabilities'] ?? array() );
-        return $live ? $live : WPI_Database_Health::engine_capabilities( $engine, $family );
+        return $live ? $live : PFC_Database_Health::engine_capabilities( $engine, $family );
     }
 
     private static function orphan_type_supported( $type ) {
@@ -1482,7 +1482,7 @@ final class WPI_Database_Repair {
         $protected = array(
             'siteurl','home','blogname','blogdescription','admin_email','users_can_register','default_role','start_of_week',
             'permalink_structure','rewrite_rules','active_plugins','template','stylesheet','current_theme','cron','sidebars_widgets',
-            'wp_user_roles','wpi_runtime','wpi_secret','wpi_last_scan',
+            'wp_user_roles','pfc_runtime','pfc_secret','pfc_last_scan',
         );
         if ( in_array( $name, $protected, true ) ) { return true; }
         return 0 === strpos( $name, 'widget_' ) || 0 === strpos( $name, 'theme_mods_' );
@@ -1497,16 +1497,16 @@ final class WPI_Database_Repair {
     }
 
     private static function index_columns_from_definition( $definition ) {
-        if ( ! preg_match( '/\((.+)\)/', (string) $definition, $m ) ) { return new WP_Error( 'wpi_index_parse', 'Could not parse index columns.' ); }
+        if ( ! preg_match( '/\((.+)\)/', (string) $definition, $m ) ) { return new WP_Error( 'pfc_index_parse', 'Could not parse index columns.' ); }
         $columns = array();
         foreach ( explode( ',', $m[1] ) as $part ) {
             $part = trim( $part );
-            if ( ! preg_match( '/^`?([A-Za-z0-9_]+)`?(?:\(\d+\))?(?:\s+(?:ASC|DESC))?$/i', $part, $pm ) ) { return new WP_Error( 'wpi_index_parse', 'Unsupported or unsafe index column definition.' ); }
+            if ( ! preg_match( '/^`?([A-Za-z0-9_]+)`?(?:\(\d+\))?(?:\s+(?:ASC|DESC))?$/i', $part, $pm ) ) { return new WP_Error( 'pfc_index_parse', 'Unsupported or unsafe index column definition.' ); }
             $column = self::safe_identifier( $pm[1] );
-            if ( ! $column ) { return new WP_Error( 'wpi_index_parse', 'Unsafe index column.' ); }
+            if ( ! $column ) { return new WP_Error( 'pfc_index_parse', 'Unsafe index column.' ); }
             $columns[] = $column;
         }
-        return $columns ? $columns : new WP_Error( 'wpi_index_parse', 'No index columns found.' );
+        return $columns ? $columns : new WP_Error( 'pfc_index_parse', 'No index columns found.' );
     }
 
     /**
@@ -1529,10 +1529,10 @@ final class WPI_Database_Repair {
         $column = self::safe_identifier( $column );
         $definition = trim( (string) $definition );
         if ( ! $table || ! $column || ! self::safe_core_definition( $definition ) ) {
-            return new WP_Error( 'wpi_schema_plan', 'Invalid core-column repair target or definition.' );
+            return new WP_Error( 'pfc_schema_plan', 'Invalid core-column repair target or definition.' );
         }
 
-        $expected_primary = WPI_Database_Health::expected_core_index_definition( $table, 'PRIMARY' );
+        $expected_primary = PFC_Database_Health::expected_core_index_definition( $table, 'PRIMARY' );
         $live_primary = self::index_rows( $table, 'PRIMARY' );
         $live_primary_columns = self::index_columns_from_rows( $live_primary );
         $expected_primary_columns = array();
@@ -1625,7 +1625,7 @@ final class WPI_Database_Repair {
         $table = self::safe_table( $table );
         $definition = trim( (string) $definition );
         if ( ! $table || 0 !== stripos( $definition, 'PRIMARY KEY' ) || ! self::safe_core_definition( $definition ) ) {
-            return new WP_Error( 'wpi_primary_definition', 'The expected WordPress PRIMARY KEY definition could not be validated.' );
+            return new WP_Error( 'pfc_primary_definition', 'The expected WordPress PRIMARY KEY definition could not be validated.' );
         }
 
         $key_columns = self::index_columns_from_definition( $definition );
@@ -1635,7 +1635,7 @@ final class WPI_Database_Repair {
         $column_rows = $wpdb->get_results( 'SHOW COLUMNS FROM `' . $table . '`', ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $column_error = $wpdb->last_error;
         $wpdb->suppress_errors( $old );
-        if ( $column_error ) { return new WP_Error( 'wpi_primary_columns', sanitize_text_field( $column_error ) ); }
+        if ( $column_error ) { return new WP_Error( 'pfc_primary_columns', sanitize_text_field( $column_error ) ); }
         $actual = array();
         foreach ( (array) $column_rows as $row ) {
             $field = (string) ( $row['Field'] ?? '' );
@@ -1648,29 +1648,29 @@ final class WPI_Database_Repair {
         $added_columns = array();
 
         foreach ( $key_columns as $column ) {
-            $expected = WPI_Database_Health::expected_core_column_definition( $table, $column );
+            $expected = PFC_Database_Health::expected_core_column_definition( $table, $column );
             if ( ! $expected || ! self::safe_core_definition( $expected ) ) {
-                return new WP_Error( 'wpi_primary_column_definition', 'The installed WordPress schema did not provide a safe definition for PRIMARY KEY column ' . $table . '.' . $column . '.' );
+                return new WP_Error( 'pfc_primary_column_definition', 'The installed WordPress schema did not provide a safe definition for PRIMARY KEY column ' . $table . '.' . $column . '.' );
             }
 
             if ( ! isset( $actual[ $column ] ) ) {
-                // WPI cannot invent PRIMARY KEY values for an existing populated table. Even
+                // Performance Console cannot invent PRIMARY KEY values for an existing populated table. Even
                 // AUTO_INCREMENT backfilling is a data-changing rebuild and should not be used
                 // as an implicit schema repair. Empty tables can be restored atomically.
                 $old = $wpdb->suppress_errors( true );
                 $has_rows = $wpdb->get_var( 'SELECT 1 FROM `' . $table . '` LIMIT 1' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
                 $row_error = $wpdb->last_error;
                 $wpdb->suppress_errors( $old );
-                if ( $row_error ) { return new WP_Error( 'wpi_primary_missing_column', sanitize_text_field( $row_error ) ); }
+                if ( $row_error ) { return new WP_Error( 'pfc_primary_missing_column', sanitize_text_field( $row_error ) ); }
                 if ( null !== $has_rows ) {
-                    return new WP_Error( 'wpi_primary_missing_column_data', 'Cannot automatically restore PRIMARY KEY because key column ' . $table . '.' . $column . ' is missing while the table contains data. WPI will not invent key values; use a guided data-recovery plan.' );
+                    return new WP_Error( 'pfc_primary_missing_column_data', 'Cannot automatically restore PRIMARY KEY because key column ' . $table . '.' . $column . ' is missing while the table contains data. Performance Console will not invent key values; use a guided data-recovery plan.' );
                 }
                 $clauses[] = 'ADD COLUMN ' . $expected;
                 $added_columns[] = $column;
                 continue;
             }
 
-            $drift = WPI_Database_Health::compare_core_column_definition( $expected, $actual[ $column ] );
+            $drift = PFC_Database_Health::compare_core_column_definition( $expected, $actual[ $column ] );
             $actual_nullable = 'YES' === strtoupper( (string) ( $actual[ $column ]['Null'] ?? 'YES' ) );
             $expected_not_null = false !== stripos( $expected, 'NOT NULL' );
             if ( $preflight_data && $expected_not_null && $actual_nullable ) {
@@ -1678,8 +1678,8 @@ final class WPI_Database_Repair {
                 if ( is_wp_error( $has_nulls ) ) { return $has_nulls; }
                 if ( $has_nulls ) {
                     return new WP_Error(
-                        'wpi_primary_null_values',
-                        'Cannot restore PRIMARY KEY because ' . $table . '.' . $column . ' contains NULL values. WPI will not invent replacement IDs; review those rows first.'
+                        'pfc_primary_null_values',
+                        'Cannot restore PRIMARY KEY because ' . $table . '.' . $column . ' contains NULL values. Performance Console will not invent replacement IDs; review those rows first.'
                     );
                 }
             }
@@ -1690,7 +1690,7 @@ final class WPI_Database_Repair {
                 $has_negative = self::column_has_negative_values( $table, $column );
                 if ( is_wp_error( $has_negative ) ) { return $has_negative; }
                 if ( $has_negative ) {
-                    return new WP_Error( 'wpi_primary_negative_values', 'Cannot convert ' . $table . '.' . $column . ' to the expected unsigned core type because negative values exist.' );
+                    return new WP_Error( 'pfc_primary_negative_values', 'Cannot convert ' . $table . '.' . $column . ' to the expected unsigned core type because negative values exist.' );
                 }
             }
 
@@ -1704,7 +1704,7 @@ final class WPI_Database_Repair {
             $dupes = self::index_has_duplicates( $table, $definition );
             if ( is_wp_error( $dupes ) ) { return $dupes; }
             if ( $dupes ) {
-                return new WP_Error( 'wpi_primary_duplicates', 'Duplicate values prevent the expected PRIMARY KEY from being created safely.' );
+                return new WP_Error( 'pfc_primary_duplicates', 'Duplicate values prevent the expected PRIMARY KEY from being created safely.' );
             }
         }
 
@@ -1720,44 +1720,44 @@ final class WPI_Database_Repair {
     private static function column_has_nulls( $table, $column ) {
         global $wpdb;
         $table = self::safe_table( $table ); $column = self::safe_identifier( $column );
-        if ( ! $table || ! $column ) { return new WP_Error( 'wpi_column_preflight', 'Invalid table or column for NULL preflight.' ); }
+        if ( ! $table || ! $column ) { return new WP_Error( 'pfc_column_preflight', 'Invalid table or column for NULL preflight.' ); }
         $old = $wpdb->suppress_errors( true );
         $found = $wpdb->get_var( 'SELECT 1 FROM `' . $table . '` WHERE `' . $column . '` IS NULL LIMIT 1' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $error = $wpdb->last_error;
         $wpdb->suppress_errors( $old );
-        if ( $error ) { return new WP_Error( 'wpi_column_preflight', sanitize_text_field( $error ) ); }
+        if ( $error ) { return new WP_Error( 'pfc_column_preflight', sanitize_text_field( $error ) ); }
         return null !== $found;
     }
 
     private static function column_has_negative_values( $table, $column ) {
         global $wpdb;
         $table = self::safe_table( $table ); $column = self::safe_identifier( $column );
-        if ( ! $table || ! $column ) { return new WP_Error( 'wpi_column_preflight', 'Invalid table or column for unsigned-type preflight.' ); }
+        if ( ! $table || ! $column ) { return new WP_Error( 'pfc_column_preflight', 'Invalid table or column for unsigned-type preflight.' ); }
         $old = $wpdb->suppress_errors( true );
         $found = $wpdb->get_var( 'SELECT 1 FROM `' . $table . '` WHERE `' . $column . '` < 0 LIMIT 1' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $error = $wpdb->last_error;
         $wpdb->suppress_errors( $old );
-        if ( $error ) { return new WP_Error( 'wpi_column_preflight', sanitize_text_field( $error ) ); }
+        if ( $error ) { return new WP_Error( 'pfc_column_preflight', sanitize_text_field( $error ) ); }
         return null !== $found;
     }
 
     private static function index_has_duplicates( $table, $definition ) {
         global $wpdb;
-        if ( ! preg_match( '/\((.+)\)/', $definition, $m ) ) { return new WP_Error( 'wpi_index_parse', 'Could not parse index columns.' ); }
+        if ( ! preg_match( '/\((.+)\)/', $definition, $m ) ) { return new WP_Error( 'pfc_index_parse', 'Could not parse index columns.' ); }
         $parts = array();
         foreach ( explode( ',', $m[1] ) as $part ) {
             $part = trim( preg_replace( '/\(\d+\)/', '', $part ) );
             $part = trim( $part, " `\t\n\r\0\x0B" );
-            if ( ! self::safe_identifier( $part ) ) { return new WP_Error( 'wpi_index_parse', 'Unsafe index column.' ); }
+            if ( ! self::safe_identifier( $part ) ) { return new WP_Error( 'pfc_index_parse', 'Unsafe index column.' ); }
             $parts[] = '`' . $part . '`';
         }
-        if ( ! $parts ) { return new WP_Error( 'wpi_index_parse', 'No index columns found.' ); }
+        if ( ! $parts ) { return new WP_Error( 'pfc_index_parse', 'No index columns found.' ); }
         $cols = implode( ',', $parts );
         $old = $wpdb->suppress_errors( true );
         $duplicate = $wpdb->get_var( "SELECT 1 FROM `{$table}` GROUP BY {$cols} HAVING COUNT(*)>1 LIMIT 1" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         $error = $wpdb->last_error;
         $wpdb->suppress_errors( $old );
-        if ( $error ) { return new WP_Error( 'wpi_index_preflight', sanitize_text_field( $error ) ); }
+        if ( $error ) { return new WP_Error( 'pfc_index_preflight', sanitize_text_field( $error ) ); }
         return null !== $duplicate;
     }
 
@@ -1773,8 +1773,8 @@ final class WPI_Database_Repair {
 
     private static function record_change( $type, $object, $before, $after ) {
         global $wpdb;
-        $wpdb->insert( WPI_Utils::table( 'changes' ), array(
-            'created_at' => WPI_Utils::now_mysql(),
+        $wpdb->insert( PFC_Utils::table( 'changes' ), array(
+            'created_at' => PFC_Utils::now_mysql(),
             'change_type' => sanitize_key( $type ),
             'object_name' => sanitize_text_field( $object ),
             'before_value' => (string) $before,

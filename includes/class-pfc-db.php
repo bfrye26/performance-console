@@ -1,42 +1,42 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_DB {
+final class PFC_DB {
     const DB_VERSION = '2.2.1';
 
     public static function activate() {
         self::install();
-        if ( false === get_option( 'wpi_runtime', false ) ) {
-            add_option( 'wpi_runtime', array( 'sample_rate' => 0.0002, 'rum_rate' => 0.005, 'retention_days' => 30 ), '', true );
+        if ( false === get_option( 'pfc_runtime', false ) ) {
+            add_option( 'pfc_runtime', array( 'sample_rate' => 0.0002, 'rum_rate' => 0.005, 'retention_days' => 30 ), '', true );
         }
-        if ( false === get_option( 'wpi_secret', false ) ) {
-            add_option( 'wpi_secret', wp_generate_password( 64, true, true ), '', false );
+        if ( false === get_option( 'pfc_secret', false ) ) {
+            add_option( 'pfc_secret', wp_generate_password( 64, true, true ), '', false );
         }
-        if ( false === get_option( 'wpi_usage_started_at', false ) ) {
-            add_option( 'wpi_usage_started_at', time(), '', false );
+        if ( false === get_option( 'pfc_usage_started_at', false ) ) {
+            add_option( 'pfc_usage_started_at', time(), '', false );
         }
-        if ( ! wp_next_scheduled( 'wpi_daily_maintenance' ) ) {
-            wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'wpi_daily_maintenance' );
+        if ( ! wp_next_scheduled( 'pfc_daily_maintenance' ) ) {
+            wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', 'pfc_daily_maintenance' );
         }
-        WPI_Bootstrap::install();
+        PFC_Bootstrap::install();
     }
 
     public static function deactivate() {
-        $ts = wp_next_scheduled( 'wpi_daily_maintenance' );
-        if ( $ts ) { wp_unschedule_event( $ts, 'wpi_daily_maintenance' ); }
+        $ts = wp_next_scheduled( 'pfc_daily_maintenance' );
+        if ( $ts ) { wp_unschedule_event( $ts, 'pfc_daily_maintenance' ); }
     }
 
     public static function maybe_upgrade() {
-        $previous = (string) get_option( 'wpi_db_version', '' );
+        $previous = (string) get_option( 'pfc_db_version', '' );
         if ( $previous !== self::DB_VERSION ) {
             // 1.0 shipped with intentionally temporary high sampling defaults and no settings UI.
             // Lower only that exact legacy default during upgrade; never overwrite customized values.
             if ( '1.0.0' === $previous ) {
-                $runtime = get_option( 'wpi_runtime', array() );
+                $runtime = get_option( 'pfc_runtime', array() );
                 if ( is_array( $runtime ) && isset( $runtime['sample_rate'], $runtime['rum_rate'] ) && 0.01 === (float) $runtime['sample_rate'] && 0.01 === (float) $runtime['rum_rate'] ) {
                     $runtime['sample_rate'] = 0.0002;
                     $runtime['rum_rate'] = 0.005;
-                    update_option( 'wpi_runtime', $runtime, true );
+                    update_option( 'pfc_runtime', $runtime, true );
                 }
             }
             self::install();
@@ -49,21 +49,21 @@ final class WPI_DB {
             // parser, while healthy sites do not keep dangerous false repair cards.
             if ( '' === $previous || version_compare( $previous, '1.5.1', '<' ) ) {
                 global $wpdb;
-                $issues = WPI_Utils::table( 'issues' );
+                $issues = PFC_Utils::table( 'issues' );
                 $wpdb->update(
                     $issues,
                     array( 'status' => 'resolved' ),
                     array( 'title' => 'WordPress core database column definition does not match core' )
                 );
-                delete_option( 'wpi_last_scan' );
+                delete_option( 'pfc_last_scan' );
             }
         }
-        add_action( 'wpi_daily_maintenance', array( __CLASS__, 'cleanup' ) );
+        add_action( 'pfc_daily_maintenance', array( __CLASS__, 'cleanup' ) );
     }
 
     private static function migrate_incidents() {
         global $wpdb;
-        $table = WPI_Utils::table( 'issues' );
+        $table = PFC_Utils::table( 'issues' );
         $rows = $wpdb->get_results( "SELECT id,area,title,message,route,last_seen,status FROM {$table} ORDER BY id ASC LIMIT 5000", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $stale_cut = time() - 7 * DAY_IN_SECONDS;
         foreach ( (array) $rows as $row ) {
@@ -72,7 +72,7 @@ final class WPI_DB {
             $passive = $route && ( ! filter_var( $route, FILTER_VALIDATE_URL ) || ! in_array( $area, array( 'frontend', 'regression' ), true ) );
             $source = $passive ? 'passive' : 'legacy';
             $data = array(
-                'incident_key' => WPI_Utils::incident_key( $area, (string) ( $row['title'] ?? '' ), (string) ( $row['message'] ?? '' ) ),
+                'incident_key' => PFC_Utils::incident_key( $area, (string) ( $row['title'] ?? '' ), (string) ( $row['message'] ?? '' ) ),
                 'source' => $source,
             );
             if ( $passive && 'open' === (string) ( $row['status'] ?? '' ) && strtotime( (string) ( $row['last_seen'] ?? '' ) . ' UTC' ) < $stale_cut ) {
@@ -89,13 +89,13 @@ final class WPI_DB {
         global $wpdb;
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         $charset = $wpdb->get_charset_collate();
-        $runs = WPI_Utils::table( 'runs' );
-        $queries = WPI_Utils::table( 'queries' );
-        $issues = WPI_Utils::table( 'issues' );
-        $metrics = WPI_Utils::table( 'metrics' );
-        $changes = WPI_Utils::table( 'changes' );
-        $option_usage = WPI_Utils::table( 'option_usage' );
-        $backups = WPI_Utils::table( 'backups' );
+        $runs = PFC_Utils::table( 'runs' );
+        $queries = PFC_Utils::table( 'queries' );
+        $issues = PFC_Utils::table( 'issues' );
+        $metrics = PFC_Utils::table( 'metrics' );
+        $changes = PFC_Utils::table( 'changes' );
+        $option_usage = PFC_Utils::table( 'option_usage' );
+        $backups = PFC_Utils::table( 'backups' );
 
         dbDelta( "CREATE TABLE {$runs} (
             id bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -234,41 +234,41 @@ final class WPI_DB {
             KEY created_at (created_at),
             KEY verified_at (verified_at)
         ) {$charset};" );
-        if ( false === get_option( 'wpi_usage_started_at', false ) ) {
-            add_option( 'wpi_usage_started_at', time(), '', false );
+        if ( false === get_option( 'pfc_usage_started_at', false ) ) {
+            add_option( 'pfc_usage_started_at', time(), '', false );
         }
         // Backfill stable incident identities without discarding existing evidence.
         $wpdb->query( "UPDATE {$issues} SET incident_key=issue_key WHERE incident_key=''" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        update_option( 'wpi_db_version', self::DB_VERSION, true );
+        update_option( 'pfc_db_version', self::DB_VERSION, true );
         // The version option is read on every request; keep it in the autoloaded set.
         if ( function_exists( 'wp_set_option_autoload' ) ) {
-            wp_set_option_autoload( 'wpi_db_version', true );
+            wp_set_option_autoload( 'pfc_db_version', true );
         } else {
-            $wpdb->update( $wpdb->options, array( 'autoload' => 'yes' ), array( 'option_name' => 'wpi_db_version' ) );
+            $wpdb->update( $wpdb->options, array( 'autoload' => 'yes' ), array( 'option_name' => 'pfc_db_version' ) );
             wp_cache_delete( 'alloptions', 'options' );
-            wp_cache_delete( 'wpi_db_version', 'options' );
+            wp_cache_delete( 'pfc_db_version', 'options' );
         }
     }
 
     public static function cleanup() {
         global $wpdb;
-        $runtime = get_option( 'wpi_runtime', array() );
+        $runtime = get_option( 'pfc_runtime', array() );
         $days = max( 7, min( 365, (int) ( $runtime['retention_days'] ?? 30 ) ) );
         $raw_days = min( $days, 14 );
         $runs_cut = gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS * $raw_days );
         $metrics_cut = gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS * $days );
-        $runs_table = WPI_Utils::table( 'runs' );
-        $metrics_table = WPI_Utils::table( 'metrics' );
+        $runs_table = PFC_Utils::table( 'runs' );
+        $metrics_table = PFC_Utils::table( 'metrics' );
         $wpdb->query( $wpdb->prepare( "DELETE FROM {$runs_table} WHERE created_at < %s LIMIT 5000", $runs_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $wpdb->query( $wpdb->prepare( "DELETE FROM {$metrics_table} WHERE bucket < %s LIMIT 5000", $metrics_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        $qtable = WPI_Utils::table( 'queries' );
-        $rtable = WPI_Utils::table( 'runs' );
+        $qtable = PFC_Utils::table( 'queries' );
+        $rtable = PFC_Utils::table( 'runs' );
         $ids = $wpdb->get_col( "SELECT q.id FROM {$qtable} q LEFT JOIN {$rtable} r ON r.id=q.run_id WHERE r.id IS NULL LIMIT 5000" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         if ( $ids ) {
             $ids = array_map( 'absint', $ids );
             $wpdb->query( "DELETE FROM {$qtable} WHERE id IN (" . implode( ',', $ids ) . ')' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         }
-        $issues = WPI_Utils::table( 'issues' );
+        $issues = PFC_Utils::table( 'issues' );
         $passive_cut = gmdate( 'Y-m-d H:i:s', time() - 7 * DAY_IN_SECONDS );
         $wpdb->query( $wpdb->prepare( "UPDATE {$issues} SET status='resolved',resolved_at=UTC_TIMESTAMP() WHERE status IN ('open','observing','verifying') AND source='passive' AND last_seen < %s", $passive_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $resolved_cut = gmdate( 'Y-m-d H:i:s', time() - 90 * DAY_IN_SECONDS );

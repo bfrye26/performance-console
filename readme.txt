@@ -1,4 +1,4 @@
-=== WP Performance Inspector ===
+=== Performance Console ===
 Contributors: cgm
 Tags: performance, database, query, profiler, diagnostics, slow queries
 Requires at least: 6.4
@@ -11,7 +11,7 @@ Production-oriented WordPress diagnostics and remediation with database integrit
 
 == Description ==
 
-WP Performance Inspector identifies database, plugin, query, job, cache, PHP/server and frontend bottlenecks and gives evidence-backed recommendations.
+Performance Console identifies database, plugin, query, job, cache, PHP/server and frontend bottlenecks and gives evidence-backed recommendations.
 
 Database diagnostics include current-core schema comparison, missing columns/indexes, integrity checks, orphaned data, autoload pressure, transient buildup, fragmentation, engine/collation problems, lock/connection pressure, InnoDB signals and slow-query/server counters.
 
@@ -26,7 +26,7 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 3. Run a production-safe scan.
 4. Install/verify the MU bootstrap for signed deep diagnostics.
 5. Review Database Repair Centre actions before applying them.
-6. Create and verify a WPI database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
+6. Create and verify a Performance Console database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
 
 == Changelog ==
 
@@ -82,20 +82,20 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 * Renames the action to Remove Duplicate Index while preserving backup, large-table, ownership and live-signature safety checks.
 
 = 1.10.0 =
-* Adds plugin-managed database index ownership through the `wpi_managed_database_indexes` registry.
-* Integrates with CGM Authors 5.2.4 so WPI recognizes `cgm_authors_lookup` as canonical and the historical `cgm_idx_*` names as managed legacy aliases.
+* Adds plugin-managed database index ownership through the `pfc_managed_database_indexes` registry.
+* Integrates with CGM Authors 5.2.4 so Performance Console recognizes `cgm_authors_lookup` as canonical and the historical `cgm_idx_*` names as managed legacy aliases.
 * Duplicate-index repairs now keep the canonical name when present, otherwise the owning plugin's highest-priority legacy alias, rather than selecting by result order.
 * Revalidates managed-index ownership and keep/drop direction immediately before DDL.
 * Database Repair Centre now shows the owning plugin and canonical-name state for registered equivalent indexes.
 
 = 1.9.2 =
 * Fixed core-column repair when the selected column is part of a malformed live PRIMARY KEY even though WordPress does not expect that column in the key. This specifically prevents the MySQL/MariaDB error "All parts of a PRIMARY KEY must be NOT NULL" when correcting nullable core columns such as wp_usermeta.meta_key.
-* Added live-vs-expected PRIMARY KEY dependency planning. WPI can atomically drop the malformed live key, correct the selected column, and restore the exact WordPress PRIMARY KEY in one ALTER.
+* Added live-vs-expected PRIMARY KEY dependency planning. Performance Console can atomically drop the malformed live key, correct the selected column, and restore the exact WordPress PRIMARY KEY in one ALTER.
 * Preview SQL now comes from the same dependency planner used at execution time, so dependency repairs are visible before confirmation.
 * Retained NULL, duplicate-key and signed-to-unsigned preflights for all coordinated PRIMARY KEY work.
 
 = 1.9.0 =
-* New indigo/cyan Performance Inspector colour system distinct from CGM Tag Manager.
+* New indigo/cyan Performance Console colour system distinct from CGM Tag Manager.
 * Removed external Google Fonts admin request.
 * Fixed tab-row vertical overflow/scrollbar.
 * Exact full-dataset finding counts with 200-row display limit called out separately.
@@ -115,7 +115,7 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 * Added an InnoDB Transaction Manager directly in wp-admin for DDL-blocking, stuck and idle transactions.
 * Shows MySQL thread/transaction IDs, age/state, connection user/host/database, rows locked/modified, normalized SQL and blocker/waiter relationships.
 * Adds risk-classified guarded `KILL CONNECTION` handling with explicit rollback acknowledgement and an additional high-risk rollback acknowledgement for very old/large transactions.
-* WPI refuses to terminate its own connection, database/server system sessions, replication/daemon sessions or transactions already rolling back.
+* Performance Console refuses to terminate its own connection, database/server system sessions, replication/daemon sessions or transactions already rolling back.
 * DDL safety errors now link directly to the Transaction Manager and include live transaction context.
 * Added `wp performance innodb-transactions` and `wp performance innodb-terminate`.
 * Long-running transaction findings now point to the in-plugin remediation workflow instead of only telling administrators to resolve the transaction externally.
@@ -133,7 +133,7 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 * Added a Database Backups area with private logical schema/data exports.
 * Browser backups are resumable and process rows in bounded batches; numeric primary keys use cursor pagination to avoid large OFFSET scans.
 * Added backup completion markers, SHA-256 verification, authenticated downloads and private/randomized storage with deny rules.
-* Recent verified WPI backups can satisfy Repair Centre backup requirements directly. External verified snapshots/backups remain supported.
+* Recent verified Performance Console backups can satisfy Repair Centre backup requirements directly. External verified snapshots/backups remain supported.
 * Added guided wp-admin maintenance execution for previously CLI-only large repairs, retaining backup, lock, disk, DDL and explicit-risk gates.
 * WP-CLI remains available as the recommended path for the largest database operations.
 * Added `wp performance database-backup` and `wp performance database-backups`.

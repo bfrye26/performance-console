@@ -10,7 +10,7 @@ function setup({ beacon = true, late = false } = {}) {
     let tokenResolve;
     const tokenData = () => ({ nonce: 'nonce', token: 'token', expires: Date.now() / 1000 + 600, route_group: 'frontend:home' });
     const context = {
-        performance: {}, wpiRum: { rate: 1, route_group: 'frontend:home', endpoint: '/rum', tokenEndpoint: '/token' },
+        performance: {}, pfcRum: { rate: 1, route_group: 'frontend:home', endpoint: '/rum', tokenEndpoint: '/token' },
         webVitals: {}, document: { visibilityState: 'visible' }, Blob, Date, Promise,
         navigator: { sendBeacon(url, body) { beacons.push(body); return beacon; } },
         fetch(url, options) {

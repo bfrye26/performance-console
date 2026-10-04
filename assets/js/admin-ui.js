@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    var root = document.querySelector('.cgm-wpi-root');
+    var root = document.querySelector('.cgm-pfc-root');
     if (!root) { return; }
 
     var legacyView = (window.location.hash || '').replace(/^#/, '');
@@ -13,14 +13,14 @@
         return;
     }
 
-    Array.prototype.forEach.call(root.querySelectorAll('[data-wpi-submit-change]'), function (control) {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-pfc-submit-change]'), function (control) {
         control.addEventListener('change', function () { if (control.form) { control.form.submit(); } });
     });
 
-    var incidentCards = Array.prototype.slice.call(root.querySelectorAll('.wpi-incident'));
-    var severityFilter = root.querySelector('[data-wpi-filter="severity"]');
-    var searchFilter = root.querySelector('[data-wpi-filter="search"]');
-    var resultCount = root.querySelector('[data-wpi-result-count]');
+    var incidentCards = Array.prototype.slice.call(root.querySelectorAll('.pfc-incident'));
+    var severityFilter = root.querySelector('[data-pfc-filter="severity"]');
+    var searchFilter = root.querySelector('[data-pfc-filter="search"]');
+    var resultCount = root.querySelector('[data-pfc-result-count]');
     var searchTimer = null;
     function filterIncidents() {
         var severity = severityFilter ? severityFilter.value : '';

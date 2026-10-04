@@ -1,6 +1,6 @@
 # Architecture
 
-WP Performance Inspector separates inexpensive monitoring, broad health scanning, signed deep profiling and explicit remediation.
+Performance Console separates inexpensive monitoring, broad health scanning, signed deep profiling and explicit remediation.
 
 ## Normal plugin
 
@@ -33,7 +33,7 @@ Save diagnostics observe one real write and persist it as a `save` run. The cook
 
 Database queries and outbound HTTP calls can be attributed from their traces. Save hook duration is measured as a whole, and registered callback components are reported only as suspects because wrapping arbitrary third-party callbacks would risk changing filter/action semantics.
 
-Every plugin-impact request carries a signed probe UUID and the intended exclusion. The response echoes both, and the normal plugin persists both with the server-side PHP measurement. WPI accepts a sample only when the response and stored run match the request. Impact is the median of paired all-plugin minus excluded-plugin PHP timings; median absolute deviation establishes a per-test noise floor before WPI calls the result repeatable.
+Every plugin-impact request carries a signed probe UUID and the intended exclusion. The response echoes both, and the normal plugin persists both with the server-side PHP measurement. Performance Console accepts a sample only when the response and stored run match the request. Impact is the median of paired all-plugin minus excluded-plugin PHP timings; median absolute deviation establishes a per-test noise floor before Performance Console calls the result repeatable.
 
 No active-plugin state is changed for ordinary visitors and plugin activation/deactivation hooks are not run by a private exclusion probe.
 

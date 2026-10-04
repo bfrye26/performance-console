@@ -1,8 +1,8 @@
 (function () {
     'use strict';
-    var config = window.wpiBackupAdmin || {};
-    var form = document.getElementById('wpi-backup-create-form');
-    var statusBox = document.getElementById('wpi-backup-progress');
+    var config = window.pfcBackupAdmin || {};
+    var form = document.getElementById('pfc-backup-create-form');
+    var statusBox = document.getElementById('pfc-backup-progress');
     if (!form || !config.restRoot || !config.nonce) { return; }
 
     function request(path, body) {
@@ -95,7 +95,7 @@
         var button = form.querySelector('button[type="submit"]');
         if (button) { button.disabled = true; }
         var scope = form.querySelector('[name="backup_scope"]');
-        show('<strong>Starting database backup…</strong> The browser can remain on this page while WPI exports the database using adaptive high-throughput batches.', 'info');
+        show('<strong>Starting database backup…</strong> The browser can remain on this page while Performance Console exports the database using adaptive high-throughput batches.', 'info');
         request('/backups', {scope: scope ? scope.value : 'wordpress'}).then(function (data) {
             renderProgress(data);
             return run(data.id);
@@ -105,17 +105,17 @@
         });
     });
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-wpi-resume-backup]'), function (button) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pfc-resume-backup]'), function (button) {
         button.addEventListener('click', function () {
             button.disabled = true;
-            run(button.getAttribute('data-wpi-resume-backup'));
+            run(button.getAttribute('data-pfc-resume-backup'));
         });
     });
 
-    Array.prototype.forEach.call(document.querySelectorAll('[data-wpi-verify-backup]'), function (button) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pfc-verify-backup]'), function (button) {
         button.addEventListener('click', function () {
             button.disabled = true;
-            var id = Number(button.getAttribute('data-wpi-verify-backup'));
+            var id = Number(button.getAttribute('data-pfc-verify-backup'));
             show('<strong>Verifying backup #' + id + '…</strong>', 'info');
             request('/backups/' + id + '/verify', {}).then(function () {
                 show('<strong>Backup verified.</strong> Reloading backup list…', 'success');

@@ -23,9 +23,9 @@ function wp_generate_uuid4() { return '12345678-1234-1234-1234-123456789abc'; }
 function add_query_arg( $token, $url ) { return $url; }
 function apply_filters( $name, $value ) { return $value; }
 function wp_remote_get( ...$args ) { return new WP_Error(); }
-class WPI_REST { public static function load_diagnostics() {} }
-class WPI_Bootstrap { public static function token( ...$args ) { return array(); } }
-class WPI_Utils {
+class PFC_REST { public static function load_diagnostics() {} }
+class PFC_Bootstrap { public static function token( ...$args ) { return array(); } }
+class PFC_Utils {
     public static $status = 'open';
     public static function incident( $key ) {
         global $scenario;
@@ -34,14 +34,14 @@ class WPI_Utils {
     public static function set_incident_status( $key, $status ) { self::$status = $status; }
     public static function finish_verification( $key ) { throw new RuntimeException( 'Must not resolve an unproven recheck' ); }
 }
-class WPI_Scanner {
+class PFC_Scanner {
     public static function scan( ...$args ) {
         global $scenario;
         if ( 0 !== strpos( $scenario, 'scan-' ) ) { throw new RuntimeException( 'No unrelated scan fallback allowed' ); }
         return array( 'observed_incidents' => 'scan-present' === $scenario ? array( str_repeat( 'a', 32 ) ) : array() );
     }
 }
-require dirname( __DIR__ ) . '/includes/class-wpi-admin.php';
+require dirname( __DIR__ ) . '/includes/class-pfc-admin.php';
 $_POST = array( 'incident_key' => str_repeat( 'a', 32 ), 'incident_action' => 'verify' );
-try { WPI_Admin::incident_action_post(); }
-catch ( RedirectCaptured $e ) { echo WPI_Utils::$status; }
+try { PFC_Admin::incident_action_post(); }
+catch ( RedirectCaptured $e ) { echo PFC_Utils::$status; }

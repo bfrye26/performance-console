@@ -1,7 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_Job_Health {
+final class PFC_Job_Health {
     public static function inspect( $deep = false, $force_large = false ) {
         return array(
             'cron' => self::cron(),
@@ -107,19 +107,19 @@ final class WPI_Job_Health {
     public static function generate_issues( array $health ) {
         $cron = $health['cron'];
         if ( $cron['overdue'] > 100 ) {
-            WPI_Utils::issue( 'cron', $cron['overdue'] > 1000 ? 'critical' : 'high', 'Large WP-Cron backlog', number_format_i18n( $cron['overdue'] ) . ' events are more than five minutes overdue.', number_format_i18n( $cron['overdue'] ) . ' overdue jobs', 'Confirm cron spawning is working, then identify hooks that take longer than their recurrence interval or repeatedly fail.' );
+            PFC_Utils::issue( 'cron', $cron['overdue'] > 1000 ? 'critical' : 'high', 'Large WP-Cron backlog', number_format_i18n( $cron['overdue'] ) . ' events are more than five minutes overdue.', number_format_i18n( $cron['overdue'] ) . ' overdue jobs', 'Confirm cron spawning is working, then identify hooks that take longer than their recurrence interval or repeatedly fail.' );
         }
         if ( $cron['severely_overdue'] > 25 ) {
-            WPI_Utils::issue( 'cron', 'high', 'WP-Cron contains severely overdue events', number_format_i18n( $cron['severely_overdue'] ) . ' events are more than one hour overdue.', number_format_i18n( $cron['severely_overdue'] ), 'Test the top overdue hooks with WP-CLI and verify that a real server cron is configured if DISABLE_WP_CRON is enabled.' );
+            PFC_Utils::issue( 'cron', 'high', 'WP-Cron contains severely overdue events', number_format_i18n( $cron['severely_overdue'] ) . ' events are more than one hour overdue.', number_format_i18n( $cron['severely_overdue'] ), 'Test the top overdue hooks with WP-CLI and verify that a real server cron is configured if DISABLE_WP_CRON is enabled.' );
         }
         if ( $cron['cron_option_size'] > MB_IN_BYTES ) {
-            WPI_Utils::issue( 'cron', 'high', 'Cron schedule option is abnormally large', 'The serialized cron option is approximately ' . esc_html( size_format( $cron['cron_option_size'] ) ) . '.', size_format( $cron['cron_option_size'] ), 'Look for plugins creating duplicate single events or failing to unschedule old events. Do not manually edit the cron option.' );
+            PFC_Utils::issue( 'cron', 'high', 'Cron schedule option is abnormally large', 'The serialized cron option is approximately ' . esc_html( size_format( $cron['cron_option_size'] ) ) . '.', size_format( $cron['cron_option_size'] ), 'Look for plugins creating duplicate single events or failing to unschedule old events. Do not manually edit the cron option.' );
         }
         foreach ( $cron['short_intervals'] as $hook => $seconds ) {
-            WPI_Utils::issue( 'cron', 'warning', 'Very frequent WP-Cron recurrence', '<code>' . esc_html( $hook ) . '</code> is scheduled every ' . intval( $seconds ) . ' seconds.', $seconds . ' second interval', 'Confirm the task is lightweight and necessary. For heavy workloads, use a queue/worker or less frequent server-side schedule.' );
+            PFC_Utils::issue( 'cron', 'warning', 'Very frequent WP-Cron recurrence', '<code>' . esc_html( $hook ) . '</code> is scheduled every ' . intval( $seconds ) . ' seconds.', $seconds . ' second interval', 'Confirm the task is lightweight and necessary. For heavy workloads, use a queue/worker or less frequent server-side schedule.' );
         }
         foreach ( $cron['duplicate_patterns'] as $dupe ) {
-            WPI_Utils::issue( 'cron', 'warning', 'Cron hook has many repeated scheduled instances', '<code>' . esc_html( $dupe['key'] ) . '</code> appears ' . intval( $dupe['count'] ) . ' times with the same argument fingerprint.', $dupe['count'] . ' scheduled instances', 'Check whether the owning plugin schedules a new event without verifying wp_next_scheduled()/wp_get_scheduled_event().' );
+            PFC_Utils::issue( 'cron', 'warning', 'Cron hook has many repeated scheduled instances', '<code>' . esc_html( $dupe['key'] ) . '</code> appears ' . intval( $dupe['count'] ) . ' times with the same argument fingerprint.', $dupe['count'] . ' scheduled instances', 'Check whether the owning plugin schedules a new event without verifying wp_next_scheduled()/wp_get_scheduled_event().' );
         }
 
         $as = $health['action_scheduler'];
@@ -128,13 +128,13 @@ final class WPI_Job_Health {
         // Future scheduled work is not a backlog. Only the due/failed checks below
         // establish an actionable queue problem; bounded scans may not know due counts.
         if ( isset( $as['past_due'] ) && $as['past_due'] > 1000 ) {
-            WPI_Utils::issue( 'jobs', 'high', 'Action Scheduler has many past-due actions', number_format_i18n( $as['past_due'] ) . ' pending actions are already past due.', number_format_i18n( $as['past_due'] ) . ' past due', 'Check queue runner concurrency, cron health, failed hooks and long-running jobs.' );
+            PFC_Utils::issue( 'jobs', 'high', 'Action Scheduler has many past-due actions', number_format_i18n( $as['past_due'] ) . ' pending actions are already past due.', number_format_i18n( $as['past_due'] ) . ' past due', 'Check queue runner concurrency, cron health, failed hooks and long-running jobs.' );
         }
         if ( $failed > 100 ) {
-            WPI_Utils::issue( 'jobs', 'high', 'Action Scheduler has a large failed queue', number_format_i18n( $failed ) . ' failed actions were found.', number_format_i18n( $failed ) . ' failed', 'Inspect the top failed hooks and their logs. Repeated failures can continuously consume cron/DB resources.' );
+            PFC_Utils::issue( 'jobs', 'high', 'Action Scheduler has a large failed queue', number_format_i18n( $failed ) . ' failed actions were found.', number_format_i18n( $failed ) . ' failed', 'Inspect the top failed hooks and their logs. Repeated failures can continuously consume cron/DB resources.' );
         }
         if ( isset( $as['log_size'] ) && $as['log_size'] > 2 * GB_IN_BYTES ) {
-            WPI_Utils::issue( 'jobs', 'warning', 'Action Scheduler log table is very large', 'The Action Scheduler logs use approximately ' . esc_html( size_format( $as['log_size'] ) ) . '.', size_format( $as['log_size'] ), 'Use the owning plugin/WooCommerce retention mechanisms to prune old completed action logs in controlled batches.' );
+            PFC_Utils::issue( 'jobs', 'warning', 'Action Scheduler log table is very large', 'The Action Scheduler logs use approximately ' . esc_html( size_format( $as['log_size'] ) ) . '.', size_format( $as['log_size'] ), 'Use the owning plugin/WooCommerce retention mechanisms to prune old completed action logs in controlled batches.' );
         }
     }
 }

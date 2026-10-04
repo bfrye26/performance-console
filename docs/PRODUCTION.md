@@ -1,6 +1,6 @@
 # Production deployment
 
-WP Performance Inspector is intentionally split between low-cost observation and explicit deep diagnostics. Treat database remediation as a maintenance operation, even when the UI labels a fix as bounded or safe.
+Performance Console is intentionally split between low-cost observation and explicit deep diagnostics. Treat database remediation as a maintenance operation, even when the UI labels a fix as bounded or safe.
 
 ## Recommended rollout
 
@@ -53,14 +53,14 @@ These operations can cause data loss, long metadata locks or incompatibility wit
 
 ## Storage-engine policy
 
-Run `wp performance database-engines` to see what the live MySQL/MariaDB server reports and which operations WPI will expose. WPI does not assume every server has the same engines.
+Run `wp performance database-engines` to see what the live MySQL/MariaDB server reports and which operations Performance Console will expose. Performance Console does not assume every server has the same engines.
 
 - InnoDB: never use `REPAIR TABLE`; use integrity checks, InnoDB transaction/lock/status evidence, backups, rebuild/dump-restore or controlled InnoDB recovery where needed.
 - MyISAM/Aria: CHECK/REPAIR/ANALYZE/OPTIMIZE can be offered, but repair/rebuild operations remain maintenance actions.
 - ARCHIVE: reviewed CHECK/REPAIR/OPTIMIZE when supported.
 - CSV: CHECK is useful, but automatic repair is blocked because repair can discard rows.
 - MEMORY/HEAP: non-durable; inspect growth/limits but do not pretend a table repair provides durability.
-- NDB and plugin engines: leave cluster/engine recovery to their native tooling unless WPI has a verified operation.
+- NDB and plugin engines: leave cluster/engine recovery to their native tooling unless Performance Console has a verified operation.
 
 ## Large-site behavior
 
@@ -81,6 +81,6 @@ The plugin's rollback history is not a database backup. Before schema repair, ta
 
 ## InnoDB repair policy
 
-For InnoDB, WPI never uses `REPAIR TABLE`. Use the recovery preflight first. Mutating InnoDB DDL requires an explicit backup/snapshot acknowledgement and is blocked when active lock waits or long-running transactions are visible. WPI requests `ALGORITHM=INPLACE, LOCK=NONE` for supported rebuilds and does not retry with `ALGORITHM=COPY`. Large tables require WP-CLI `--force-large` and a maintenance window.
+For InnoDB, Performance Console never uses `REPAIR TABLE`. Use the recovery preflight first. Mutating InnoDB DDL requires an explicit backup/snapshot acknowledgement and is blocked when active lock waits or long-running transactions are visible. Performance Console requests `ALGORITHM=INPLACE, LOCK=NONE` for supported rebuilds and does not retry with `ALGORITHM=COPY`. Large tables require WP-CLI `--force-large` and a maintenance window.
 
 Secondary-index rebuilds are limited to ordinary visible BTREE indexes with reproducible metadata. FULLTEXT, SPATIAL, functional/expression, invisible and MariaDB ignored indexes remain manual. Table rebuilds are advanced maintenance, not a generic corruption repair. Serious clustered/data corruption should be recovered from a verified backup or through controlled dump/reload or engine recovery procedures.

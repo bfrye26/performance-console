@@ -1,7 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_Cache_Health {
+final class PFC_Cache_Health {
     public static function inspect() {
         global $wp_object_cache;
         $supports = array();
@@ -32,7 +32,7 @@ final class WPI_Cache_Health {
 
     private static function roundtrip() {
         $key = 'probe-' . wp_generate_uuid4();
-        $group = 'wpi-diagnostics';
+        $group = 'pfc-diagnostics';
         $value = wp_generate_uuid4();
         $start = microtime( true );
         $set = wp_cache_set( $key, $value, $group, 30 );
@@ -74,16 +74,16 @@ final class WPI_Cache_Health {
 
     public static function generate_issues( array $cache ) {
         if ( ! $cache['persistent'] ) {
-            WPI_Utils::issue( 'cache', 'info', 'No persistent object cache is active', 'WordPress reports that an external persistent object cache is not in use. This is an opportunity to evaluate, not evidence of a fault or slowdown.', 'Benefit depends on dynamic traffic and database work', 'Use representative dynamic-request measurements to decide whether Redis or Memcached is worthwhile. A lightly used, page-cached site may not benefit.' );
+            PFC_Utils::issue( 'cache', 'info', 'No persistent object cache is active', 'WordPress reports that an external persistent object cache is not in use. This is an opportunity to evaluate, not evidence of a fault or slowdown.', 'Benefit depends on dynamic traffic and database work', 'Use representative dynamic-request measurements to decide whether Redis or Memcached is worthwhile. A lightly used, page-cached site may not benefit.' );
         }
         if ( $cache['dropin'] && ! $cache['persistent'] ) {
-            WPI_Utils::issue( 'cache', 'critical', 'object-cache.php exists but WordPress is not using an external object cache', 'A cache drop-in is installed but wp_using_ext_object_cache() is false.', 'Possible broken or disabled cache integration', 'Inspect the object-cache.php provider configuration and connection errors. A broken drop-in can add latency without providing persistence.' );
+            PFC_Utils::issue( 'cache', 'critical', 'object-cache.php exists but WordPress is not using an external object cache', 'A cache drop-in is installed but wp_using_ext_object_cache() is false.', 'Possible broken or disabled cache integration', 'Inspect the object-cache.php provider configuration and connection errors. A broken drop-in can add latency without providing persistence.' );
         }
         if ( $cache['persistent'] && empty( $cache['roundtrip']['ok'] ) ) {
-            WPI_Utils::issue( 'cache', 'critical', 'Persistent object cache failed a set/get round-trip', 'The diagnostic key could not be read back in the same request. This test does not verify persistence between requests.', 'Object cache may be unreliable', 'Check Redis/Memcached connectivity, authentication, database selection, eviction policy and the object-cache drop-in logs.' );
+            PFC_Utils::issue( 'cache', 'critical', 'Persistent object cache failed a set/get round-trip', 'The diagnostic key could not be read back in the same request. This test does not verify persistence between requests.', 'Object cache may be unreliable', 'Check Redis/Memcached connectivity, authentication, database selection, eviction policy and the object-cache drop-in logs.' );
         }
         if ( ! empty( $cache['roundtrip']['ok'] ) && $cache['roundtrip']['get_ms'] > 10 ) {
-            WPI_Utils::issue( 'cache', 'high', 'Object cache round-trip is slow', 'A single cache GET took approximately ' . esc_html( $cache['roundtrip']['get_ms'] ) . ' ms from PHP.', $cache['roundtrip']['get_ms'] . ' ms GET', 'Check network distance, Redis/Memcached CPU saturation, TLS/proxy overhead and connection reuse.' );
+            PFC_Utils::issue( 'cache', 'high', 'Object cache round-trip is slow', 'A single cache GET took approximately ' . esc_html( $cache['roundtrip']['get_ms'] ) . ' ms from PHP.', $cache['roundtrip']['get_ms'] . ' ms GET', 'Check network distance, Redis/Memcached CPU saturation, TLS/proxy overhead and connection reuse.' );
         }
         $stats = $cache['stats_current_request'];
         $hits = isset( $stats['cache_hits'] ) ? $stats['cache_hits'] : ( $stats['hits'] ?? null );
@@ -91,14 +91,14 @@ final class WPI_Cache_Health {
         if ( null !== $hits && null !== $misses && ( $hits + $misses ) > 100 ) {
             $ratio = $hits / max( 1, $hits + $misses );
             if ( $ratio < 0.70 ) {
-                WPI_Utils::issue( 'cache', 'warning', 'Object-cache hit rate is low on the scan request', 'The current request reported an approximate hit ratio of ' . esc_html( round( $ratio * 100, 1 ) ) . '%.', round( $ratio * 100, 1 ) . '% hit rate', 'Compare representative frontend requests and investigate cache churn, short TTLs, non-persistent groups and frequently invalidated keys.' );
+                PFC_Utils::issue( 'cache', 'warning', 'Object-cache hit rate is low on the scan request', 'The current request reported an approximate hit ratio of ' . esc_html( round( $ratio * 100, 1 ) ) . '%.', round( $ratio * 100, 1 ) . '% hit rate', 'Compare representative frontend requests and investigate cache churn, short TTLs, non-persistent groups and frequently invalidated keys.' );
             }
         }
         if ( defined( 'WP_CACHE' ) && WP_CACHE && ! $cache['advanced_cache'] ) {
-            WPI_Utils::issue( 'cache', 'warning', 'WP_CACHE is enabled without an advanced-cache.php drop-in', 'WP_CACHE is true but no advanced-cache.php file exists.', 'Page-cache configuration may be incomplete', 'Confirm whether caching is handled entirely upstream (Nginx/Varnish/CDN). If not, repair the page-cache integration.' );
+            PFC_Utils::issue( 'cache', 'warning', 'WP_CACHE is enabled without an advanced-cache.php drop-in', 'WP_CACHE is true but no advanced-cache.php file exists.', 'Page-cache configuration may be incomplete', 'Confirm whether caching is handled entirely upstream (Nginx/Varnish/CDN). If not, repair the page-cache integration.' );
         }
         if ( ! empty( $cache['page_cache']['available'] ) && ! empty( $cache['page_cache']['status'] ) && 'good' !== $cache['page_cache']['status'] ) {
-            WPI_Utils::issue( 'cache', 'high', 'WordPress Site Health could not confirm effective page caching', esc_html( $cache['page_cache']['label'] ?: 'The built-in page-cache test did not return a good result.' ), 'Dynamic PHP may be reached more often than necessary', 'Confirm the production cache path at the CDN/reverse proxy/page-cache layer. Test both anonymous cache HITs and intentional bypasses before adding another cache plugin.' );
+            PFC_Utils::issue( 'cache', 'high', 'WordPress Site Health could not confirm effective page caching', esc_html( $cache['page_cache']['label'] ?: 'The built-in page-cache test did not return a good result.' ), 'Dynamic PHP may be reached more often than necessary', 'Confirm the production cache path at the CDN/reverse proxy/page-cache layer. Test both anonymous cache HITs and intentional bypasses before adding another cache plugin.' );
         }
     }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "wp-performance-inspector",
+  "name": "performance-console",
   "private": true,
   "scripts": {
     "build:rum": "node scripts/build-rum.mjs",

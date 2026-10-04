@@ -1,24 +1,24 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_CLI {
+final class PFC_CLI {
     public static function register() { WP_CLI::add_command( 'performance', __CLASS__ ); }
 
     /** Run the full diagnostic scanner. ## OPTIONS [--deep] [--force-large] */
     public function scan( $args, $assoc ) {
-        $r = WPI_Scanner::scan( ! empty( $assoc['deep'] ), ! empty( $assoc['force-large'] ) );
+        $r = PFC_Scanner::scan( ! empty( $assoc['deep'] ), ! empty( $assoc['force-large'] ) );
         WP_CLI::log( wp_json_encode( $r, JSON_PRETTY_PRINT ) );
     }
 
     /** Analyze database schema, integrity, runtime state and scaling risks. ## OPTIONS [--deep] [--force-large] */
     public function database( $args, $assoc ) {
-        WP_CLI::log( wp_json_encode( WPI_Scanner::database( ! empty( $assoc['deep'] ), ! empty( $assoc['force-large'] ) ), JSON_PRETTY_PRINT ) );
+        WP_CLI::log( wp_json_encode( PFC_Scanner::database( ! empty( $assoc['deep'] ), ! empty( $assoc['force-large'] ) ), JSON_PRETTY_PRINT ) );
     }
 
     /** Create and verify a private logical database backup. ## OPTIONS [--scope=<wordpress|full>] */
     public function database_backup( $args, $assoc ) {
         $scope = isset( $assoc['scope'] ) && 'full' === sanitize_key( $assoc['scope'] ) ? 'full' : 'wordpress';
-        $result = WPI_Database_Backup::cli_create( $scope );
+        $result = PFC_Database_Backup::cli_create( $scope );
         if ( is_wp_error( $result ) ) { WP_CLI::error( $result->get_error_message() ); }
         WP_CLI::log( 'Backup #' . (int) $result['id'] . ': ' . (string) $result['filename'] );
         WP_CLI::log( 'Size: ' . size_format( (int) $result['size_bytes'] ) . '; rows: ' . number_format_i18n( (int) $result['row_count'] ) );
@@ -26,10 +26,10 @@ final class WPI_CLI {
         WP_CLI::success( 'Database backup completed and verified.' );
     }
 
-    /** List WPI-managed database backups. */
+    /** List Performance Console-managed database backups. */
     public function database_backups() {
-        $rows = WPI_Database_Backup::list_backups( 50 );
-        if ( ! $rows ) { WP_CLI::log( 'No WPI database backups exist.' ); return; }
+        $rows = PFC_Database_Backup::list_backups( 50 );
+        if ( ! $rows ) { WP_CLI::log( 'No Performance Console database backups exist.' ); return; }
         $formatted = array();
         foreach ( $rows as $row ) {
             $formatted[] = array(
@@ -47,9 +47,9 @@ final class WPI_CLI {
         WP_CLI\Utils\format_items( 'table', $formatted, array( 'id','created_at','status','scope','tables','rows','size','verified_at','file' ) );
     }
 
-    /** List live database storage engines and WPI maintenance capabilities. */
+    /** List live database storage engines and Performance Console maintenance capabilities. */
     public function database_engines() {
-        $info = WPI_Database_Health::storage_engine_support();
+        $info = PFC_Database_Health::storage_engine_support();
         $rows = array();
         foreach ( (array) ( $info['engines'] ?? array() ) as $engine ) {
             if ( empty( $engine['available'] ) ) { continue; }
@@ -72,8 +72,8 @@ final class WPI_CLI {
 
     /** List database fixes supported by the current scan. */
     public function database_repairs() {
-        $health = WPI_Database_Health::inspect( true, false );
-        $plans = WPI_Database_Repair::plans( $health );
+        $health = PFC_Database_Health::inspect( true, false );
+        $plans = PFC_Database_Repair::plans( $health );
         if ( ! $plans ) { WP_CLI::success( 'No database repairs are currently recommended.' ); return; }
         WP_CLI\Utils\format_items( 'table', $plans, array( 'safety','title','detail','action','available' ) );
     }
@@ -89,7 +89,7 @@ final class WPI_CLI {
         if ( isset( $assoc['data-loss-confirmed'] ) ) { $repair_args['data_loss_confirmed'] = '1'; }
         if ( isset( $assoc['rollback-confirmed'] ) ) { $repair_args['rollback_confirmed'] = '1'; }
         if ( isset( $assoc['high-rollback-confirmed'] ) ) { $repair_args['high_rollback_confirmed'] = '1'; }
-        $result = WPI_Database_Repair::execute( $action, $repair_args, ! empty( $assoc['force-large'] ) );
+        $result = PFC_Database_Repair::execute( $action, $repair_args, ! empty( $assoc['force-large'] ) );
         if ( is_wp_error( $result ) ) { WP_CLI::error( $result->get_error_message() ); }
         WP_CLI::log( wp_json_encode( $result, JSON_PRETTY_PRINT ) );
         WP_CLI::success( $result['message'] ?? 'Database repair completed.' );
@@ -97,7 +97,7 @@ final class WPI_CLI {
 
     /** List live InnoDB transactions with termination risk classification. */
     public function innodb_transactions() {
-        $snapshot = WPI_Database_Repair::transaction_manager_snapshot();
+        $snapshot = PFC_Database_Repair::transaction_manager_snapshot();
         if ( empty( $snapshot['available'] ) ) { WP_CLI::warning( $snapshot['message'] ?? 'InnoDB transaction details are unavailable.' ); return; }
         $rows = array();
         foreach ( (array) ( $snapshot['transactions'] ?? array() ) as $trx ) {
@@ -129,7 +129,7 @@ final class WPI_CLI {
         $repair = array( 'thread_id' => $thread, 'danger_confirmed' => '1', 'rollback_confirmed' => '1' );
         if ( isset( $assoc['transaction-id'] ) ) { $repair['transaction_id'] = sanitize_text_field( (string) $assoc['transaction-id'] ); }
         if ( ! empty( $assoc['high-rollback-confirmed'] ) ) { $repair['high_rollback_confirmed'] = '1'; }
-        $result = WPI_Database_Repair::execute( 'terminate_innodb_transaction', $repair, false );
+        $result = PFC_Database_Repair::execute( 'terminate_innodb_transaction', $repair, false );
         if ( is_wp_error( $result ) ) { WP_CLI::error( $result->get_error_message() ); }
         WP_CLI::log( wp_json_encode( $result, JSON_PRETTY_PRINT ) );
         WP_CLI::success( $result['message'] ?? 'InnoDB transaction termination requested.' );
@@ -138,7 +138,7 @@ final class WPI_CLI {
     /** Build a read-only guided InnoDB recovery preflight. ## OPTIONS <table> [--force-large] */
     public function innodb_preflight( $args, $assoc ) {
         $table = sanitize_text_field( (string) ( $args[0] ?? '' ) );
-        $result = WPI_Database_Repair::execute( 'innodb_recovery_preflight', array( 'table' => $table ), ! empty( $assoc['force-large'] ) );
+        $result = PFC_Database_Repair::execute( 'innodb_recovery_preflight', array( 'table' => $table ), ! empty( $assoc['force-large'] ) );
         if ( is_wp_error( $result ) ) { WP_CLI::error( $result->get_error_message() ); }
         WP_CLI::log( wp_json_encode( $result, JSON_PRETTY_PRINT ) );
         WP_CLI::success( 'InnoDB recovery preflight completed.' );
@@ -148,30 +148,30 @@ final class WPI_CLI {
     public function innodb_rebuild_index( $args, $assoc ) {
         if ( empty( $assoc['backup-confirmed'] ) ) { WP_CLI::error( 'Pass --backup-confirmed only after verifying a current database backup/snapshot.' ); }
         $repair = array( 'table' => sanitize_text_field( (string) ( $args[0] ?? '' ) ), 'index' => sanitize_text_field( (string) ( $args[1] ?? '' ) ), 'backup_confirmed' => '1' );
-        $result = WPI_Database_Repair::execute( 'rebuild_innodb_index', $repair, ! empty( $assoc['force-large'] ) );
+        $result = PFC_Database_Repair::execute( 'rebuild_innodb_index', $repair, ! empty( $assoc['force-large'] ) );
         if ( is_wp_error( $result ) ) { WP_CLI::error( $result->get_error_message() ); }
         WP_CLI::log( wp_json_encode( $result, JSON_PRETTY_PRINT ) );
         WP_CLI::success( $result['message'] ?? 'InnoDB index rebuild completed.' );
     }
 
     /** Inspect PHP/WordPress/plugins/hooks/error logs. ## OPTIONS [--deep] */
-    public function system( $args, $assoc ) { WP_CLI::log( wp_json_encode( WPI_System_Health::inspect( ! empty( $assoc['deep'] ) ), JSON_PRETTY_PRINT ) ); }
+    public function system( $args, $assoc ) { WP_CLI::log( wp_json_encode( PFC_System_Health::inspect( ! empty( $assoc['deep'] ) ), JSON_PRETTY_PRINT ) ); }
 
     /** Inspect WP-Cron and Action Scheduler queues. ## OPTIONS [--deep] [--force-large] */
-    public function jobs( $args, $assoc ) { WP_CLI::log( wp_json_encode( WPI_Job_Health::inspect( ! empty( $assoc['deep'] ), ! empty( $assoc['force-large'] ) ), JSON_PRETTY_PRINT ) ); }
+    public function jobs( $args, $assoc ) { WP_CLI::log( wp_json_encode( PFC_Job_Health::inspect( ! empty( $assoc['deep'] ), ! empty( $assoc['force-large'] ) ), JSON_PRETTY_PRINT ) ); }
 
     /** Inspect object/page cache integration. */
-    public function cache() { WP_CLI::log( wp_json_encode( WPI_Cache_Health::inspect(), JSON_PRETTY_PRINT ) ); }
+    public function cache() { WP_CLI::log( wp_json_encode( PFC_Cache_Health::inspect(), JSON_PRETTY_PRINT ) ); }
 
     /** Probe representative frontend routes and HTML/resource pressure. ## OPTIONS [--deep] */
-    public function frontend( $args, $assoc ) { WP_CLI::log( wp_json_encode( WPI_Frontend_Health::inspect( ! empty( $assoc['deep'] ) ), JSON_PRETTY_PRINT ) ); }
+    public function frontend( $args, $assoc ) { WP_CLI::log( wp_json_encode( PFC_Frontend_Health::inspect( ! empty( $assoc['deep'] ) ), JSON_PRETTY_PRINT ) ); }
 
     /** Inspect recent performance regressions and recorded changes. */
-    public function regressions() { WP_CLI::log( wp_json_encode( WPI_Regression::inspect(), JSON_PRETTY_PRINT ) ); }
+    public function regressions() { WP_CLI::log( wp_json_encode( PFC_Regression::inspect(), JSON_PRETTY_PRINT ) ); }
 
     /** List active findings. ## OPTIONS [--severity=<severity>] [--area=<area>] */
     public function issues( $args, $assoc ) {
-        $rows = array_filter( WPI_Utils::incidents( array( 'open', 'verifying' ) ), static function ( $incident ) use ( $assoc ) {
+        $rows = array_filter( PFC_Utils::incidents( array( 'open', 'verifying' ) ), static function ( $incident ) use ( $assoc ) {
             return ( empty( $assoc['severity'] ) || sanitize_key( $assoc['severity'] ) === $incident['severity'] ) && ( empty( $assoc['area'] ) || sanitize_key( $assoc['area'] ) === $incident['area'] );
         } );
         $rows = array_map( static function ( $incident ) { return array( 'severity' => $incident['severity'], 'area' => $incident['area'], 'title' => $incident['title'], 'impact' => $incident['impact'], 'occurrences' => $incident['occurrences'], 'routes' => count( $incident['routes'] ), 'last_seen' => $incident['last_seen'], 'recommendation' => $incident['recommendation'] ); }, $rows );
@@ -180,23 +180,23 @@ final class WPI_CLI {
 
     /** Install or repair the MU bootstrap. */
     public function bootstrap() {
-        $r = WPI_Bootstrap::install();
+        $r = PFC_Bootstrap::install();
         is_wp_error( $r ) ? WP_CLI::error( $r->get_error_message() ) : WP_CLI::success( 'MU bootstrap installed.' );
     }
 
     /** Run static/runtime self-tests. */
     public function self_test() {
         global $wpdb;
-        $status = WPI_Bootstrap::status();
+        $status = PFC_Bootstrap::status();
         $checks = array(
-            'secret' => (bool) get_option( 'wpi_secret' ),
+            'secret' => (bool) get_option( 'pfc_secret' ),
             'bootstrap_installed' => $status['installed'],
             'bootstrap_current' => $status['current'],
-            'normalize_sql' => WPI_Utils::normalize_sql( "SELECT * FROM t WHERE id=123 AND email='a@b.com'" ) === 'SELECT * FROM t WHERE id=? AND email=?',
+            'normalize_sql' => PFC_Utils::normalize_sql( "SELECT * FROM t WHERE id=123 AND email='a@b.com'" ) === 'SELECT * FROM t WHERE id=? AND email=?',
             'runs_table' => false, 'queries_table' => false, 'issues_table' => false, 'metrics_table' => false, 'option_usage_table' => false, 'backups_table' => false,
         );
         foreach ( array( 'runs','queries','issues','metrics','option_usage','backups' ) as $table ) {
-            $checks[ $table . '_table' ] = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', WPI_Utils::table( $table ) ) );
+            $checks[ $table . '_table' ] = (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', PFC_Utils::table( $table ) ) );
         }
         foreach ( $checks as $k => $v ) { WP_CLI::log( ( $v ? 'PASS ' : 'FAIL ' ) . $k ); }
         if ( in_array( false, $checks, true ) ) { WP_CLI::error( 'One or more checks failed.' ); }
@@ -209,15 +209,15 @@ final class WPI_CLI {
         $runs = max( 1, min( 10, (int) ( $assoc['runs'] ?? 3 ) ) );
         $times = $this->timed( $url, '', $runs );
         if ( ! $times ) { WP_CLI::error( 'No verified diagnostic runs reached WordPress. A page cache/reverse proxy may be serving the URL before the MU profiler.' ); }
-        $median = WPI_Utils::median( $times );
-        WP_CLI::success( 'Server PHP runs: ' . implode( ', ', array_map( static function ( $v ) { return round( $v, 1 ); }, $times ) ) . ' ms; median ' . round( $median, 1 ) . ' ms. Deep SQL/HTTP/hook details are stored in Performance Inspector.' );
+        $median = PFC_Utils::median( $times );
+        WP_CLI::success( 'Server PHP runs: ' . implode( ', ', array_map( static function ( $v ) { return round( $v, 1 ); }, $times ) ) . ' ms; median ' . round( $median, 1 ) . ' ms. Deep SQL/HTTP/hook details are stored in Performance Console.' );
     }
 
     /** Estimate a plugin route impact using private signed exclusion requests. ## OPTIONS <url> <plugin-file> [--runs=<runs>] */
     public function plugin_impact( $args, $assoc ) {
         $url = $this->own_url( $args[0] );
         $plugin = sanitize_text_field( $args[1] );
-        if ( $plugin === WPI_BASENAME ) { WP_CLI::error( 'Performance Inspector cannot exclude itself.' ); }
+        if ( $plugin === PFC_BASENAME ) { WP_CLI::error( 'Performance Console cannot exclude itself.' ); }
         $runs = max( 5, min( 10, (int) ( $assoc['runs'] ?? 5 ) ) );
         $active = array_merge( (array) get_option( 'active_plugins', array() ), is_multisite() ? array_keys( (array) get_site_option( 'active_sitewide_plugins', array() ) ) : array() );
         if ( ! in_array( $plugin, $active, true ) ) { WP_CLI::error( 'Plugin must be active.' ); }
@@ -234,8 +234,8 @@ final class WPI_CLI {
             if ( null !== $pair_values['baseline'] && null !== $pair_values['without'] ) { $deltas[] = round( $pair_values['baseline'] - $pair_values['without'], 3 ); }
         }
         if ( count( $deltas ) < $runs ) { WP_CLI::error( 'Benchmark could not match every request to a verified server-side measurement. Check the MU profiler and page-cache bypass.' ); }
-        $base_m = WPI_Utils::median( $base ); $without_m = WPI_Utils::median( $without );
-        $analysis = WPI_Utils::analyze_paired_impact( $deltas, true );
+        $base_m = PFC_Utils::median( $base ); $without_m = PFC_Utils::median( $without );
+        $analysis = PFC_Utils::analyze_paired_impact( $deltas, true );
         WP_CLI::log( 'Baseline PHP median: ' . round( $base_m, 1 ) . ' ms' );
         WP_CLI::log( 'Without ' . $plugin . ': ' . round( $without_m, 1 ) . ' ms' );
         WP_CLI::log( 'Pair deltas: ' . implode( ', ', array_map( static function ( $value ) { return ( $value >= 0 ? '+' : '' ) . round( $value, 1 ); }, $deltas ) ) . ' ms' );
@@ -245,7 +245,7 @@ final class WPI_CLI {
 
     private function own_url( $url ) {
         $url = esc_url_raw( $url, array( 'http', 'https' ) );
-        if ( ! $url || ! WPI_Utils::same_origin_url( $url ) ) { WP_CLI::error( 'URL must use the configured WordPress scheme, host and port.' ); }
+        if ( ! $url || ! PFC_Utils::same_origin_url( $url ) ) { WP_CLI::error( 'URL must use the configured WordPress scheme, host and port.' ); }
         $admin_path = trailingslashit( (string) wp_parse_url( admin_url(), PHP_URL_PATH ) );
         if ( 0 === strpos( trailingslashit( (string) wp_parse_url( $url, PHP_URL_PATH ) ), $admin_path ) ) { WP_CLI::error( 'Profile a public route; wp-admin loopback requests are not authenticated.' ); }
         return $url;
@@ -255,14 +255,14 @@ final class WPI_CLI {
         $a = array();
         for ( $i = 0; $i < $runs; $i++ ) {
             $probe_id = wp_generate_uuid4();
-            $tok = WPI_Bootstrap::token( $url, $exclude, $probe_id );
+            $tok = PFC_Bootstrap::token( $url, $exclude, $probe_id );
             $u = add_query_arg( $tok, $url );
             $r = wp_remote_get( $u, array( 'timeout' => 30, 'redirection' => 0, 'sslverify' => apply_filters( 'https_local_ssl_verify', false ), 'headers' => array( 'Cache-Control' => 'no-cache', 'Pragma' => 'no-cache' ) ) );
-            $headers_match = ! is_wp_error( $r ) && '1' === trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-diagnostic' ) ) && hash_equals( $probe_id, trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-probe-id' ) ) ) && hash_equals( $exclude ?: 'none', trim( (string) wp_remote_retrieve_header( $r, 'x-wpi-excluded-plugin' ) ) );
+            $headers_match = ! is_wp_error( $r ) && '1' === trim( (string) wp_remote_retrieve_header( $r, 'x-pfc-diagnostic' ) ) && hash_equals( $probe_id, trim( (string) wp_remote_retrieve_header( $r, 'x-pfc-probe-id' ) ) ) && hash_equals( $exclude ?: 'none', trim( (string) wp_remote_retrieve_header( $r, 'x-pfc-excluded-plugin' ) ) );
             if ( $headers_match ) {
                 $status = (int) wp_remote_retrieve_response_code( $r );
                 $body = (string) wp_remote_retrieve_body( $r );
-                $run = WPI_Utils::probe_run( $probe_id, $exclude );
+                $run = PFC_Utils::probe_run( $probe_id, $exclude );
                 if ( $status >= 200 && $status < 300 && strlen( $body ) >= 128 && $run ) { $a[] = round( (float) $run['php_ms'], 1 ); }
             }
         }
@@ -270,11 +270,11 @@ final class WPI_CLI {
     }
 
     /** List active plugins and loading/callback signals. */
-    public function plugins() { WP_CLI\Utils\format_items( 'table', WPI_Scanner::plugins(), array( 'active','name','version','included_php_files_current_request','registered_callbacks_current_request','registered_hooks_current_request','file' ) ); }
+    public function plugins() { WP_CLI\Utils\format_items( 'table', PFC_Scanner::plugins(), array( 'active','name','version','included_php_files_current_request','registered_callbacks_current_request','registered_hooks_current_request','file' ) ); }
 
     /** Compare two stored run IDs. ## OPTIONS <run-a> <run-b> */
     public function compare( $args ) {
-        global $wpdb; $t=WPI_Utils::table('runs');
+        global $wpdb; $t=PFC_Utils::table('runs');
         $a=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$t} WHERE id=%d",(int)$args[0]),ARRAY_A); $b=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$t} WHERE id=%d",(int)$args[1]),ARRAY_A);
         if(!$a||!$b){WP_CLI::error('Run not found.');}
         $rows=array(); foreach(array('php_ms','db_ms','query_count','http_ms','http_count','memory_peak') as $k){$rows[]=array('metric'=>$k,'a'=>$a[$k],'b'=>$b[$k],'delta'=>(float)$b[$k]-(float)$a[$k]);}

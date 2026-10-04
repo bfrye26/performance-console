@@ -1,13 +1,13 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_REST {
+final class PFC_REST {
     public static function load_diagnostics() {
         foreach ( array(
-            'class-wpi-database-health.php', 'class-wpi-database-backup.php', 'class-wpi-database-repair.php',
-            'class-wpi-system-health.php', 'class-wpi-job-health.php', 'class-wpi-cache-health.php',
-            'class-wpi-frontend-health.php', 'class-wpi-regression.php', 'class-wpi-scanner.php',
-        ) as $file ) { require_once WPI_DIR . 'includes/' . $file; }
+            'class-pfc-database-health.php', 'class-pfc-database-backup.php', 'class-pfc-database-repair.php',
+            'class-pfc-system-health.php', 'class-pfc-job-health.php', 'class-pfc-cache-health.php',
+            'class-pfc-frontend-health.php', 'class-pfc-regression.php', 'class-pfc-scanner.php',
+        ) as $file ) { require_once PFC_DIR . 'includes/' . $file; }
     }
 
     public static function init() {
@@ -16,37 +16,37 @@ final class WPI_REST {
     }
 
     public static function routes() {
-        register_rest_route( 'wpi/v1', '/scan', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'scan' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
-        register_rest_route( 'wpi/v1', '/rum', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'rum' ), 'permission_callback' => '__return_true' ) );
-        register_rest_route( 'wpi/v1', '/rum-token', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'rum_token' ), 'permission_callback' => '__return_true' ) );
-        register_rest_route( 'wpi/v1', '/autoload', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'autoload' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
-        register_rest_route( 'wpi/v1', '/backups', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'backup_create' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
-        register_rest_route( 'wpi/v1', '/backups/(?P<id>\d+)/step', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'backup_step' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
-        register_rest_route( 'wpi/v1', '/backups/(?P<id>\d+)/verify', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'backup_verify' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
+        register_rest_route( 'pfc/v1', '/scan', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'scan' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
+        register_rest_route( 'pfc/v1', '/rum', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'rum' ), 'permission_callback' => '__return_true' ) );
+        register_rest_route( 'pfc/v1', '/rum-token', array( 'methods' => 'GET', 'callback' => array( __CLASS__, 'rum_token' ), 'permission_callback' => '__return_true' ) );
+        register_rest_route( 'pfc/v1', '/autoload', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'autoload' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
+        register_rest_route( 'pfc/v1', '/backups', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'backup_create' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
+        register_rest_route( 'pfc/v1', '/backups/(?P<id>\d+)/step', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'backup_step' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
+        register_rest_route( 'pfc/v1', '/backups/(?P<id>\d+)/verify', array( 'methods' => 'POST', 'callback' => array( __CLASS__, 'backup_verify' ), 'permission_callback' => array( __CLASS__, 'manage' ) ) );
     }
 
     public static function manage() { return current_user_can( 'manage_options' ); }
-    public static function scan( WP_REST_Request $req ) { self::load_diagnostics(); return rest_ensure_response( WPI_Scanner::scan( (bool) $req->get_param( 'deep' ), false ) ); }
+    public static function scan( WP_REST_Request $req ) { self::load_diagnostics(); return rest_ensure_response( PFC_Scanner::scan( (bool) $req->get_param( 'deep' ), false ) ); }
 
 
     public static function backup_create( WP_REST_Request $req ) {
         self::load_diagnostics();
         $scope = sanitize_key( (string) $req->get_param( 'scope' ) );
-        $result = WPI_Database_Backup::create( $scope );
+        $result = PFC_Database_Backup::create( $scope );
         if ( is_wp_error( $result ) ) { return $result; }
         return rest_ensure_response( self::backup_response( $result ) );
     }
 
     public static function backup_step( WP_REST_Request $req ) {
         self::load_diagnostics();
-        $result = WPI_Database_Backup::step( absint( $req['id'] ) );
+        $result = PFC_Database_Backup::step( absint( $req['id'] ) );
         if ( is_wp_error( $result ) ) { return $result; }
         return rest_ensure_response( self::backup_response( $result ) );
     }
 
     public static function backup_verify( WP_REST_Request $req ) {
         self::load_diagnostics();
-        $result = WPI_Database_Backup::verify( absint( $req['id'] ) );
+        $result = PFC_Database_Backup::verify( absint( $req['id'] ) );
         if ( is_wp_error( $result ) ) { return $result; }
         return rest_ensure_response( self::backup_response( $result ) );
     }
@@ -99,27 +99,27 @@ final class WPI_REST {
 
     public static function rum_script() {
         if ( is_user_logged_in() || is_admin() ) { return; }
-        $r = get_option( 'wpi_runtime', array() );
+        $r = get_option( 'pfc_runtime', array() );
         $rate = max( 0, min( 1, (float) ( $r['rum_rate'] ?? 0.005 ) ) );
         if ( $rate <= 0 ) { return; }
-        wp_enqueue_script( 'wpi-web-vitals', WPI_URL . 'assets/vendor/web-vitals/web-vitals.iife.js', array(), '6.2.1', true );
-        wp_enqueue_script( 'wpi-rum', WPI_URL . 'assets/js/rum.js', array( 'wpi-web-vitals' ), WPI_VERSION, true );
-        wp_localize_script( 'wpi-rum', 'wpiRum', array(
-            'endpoint' => rest_url( 'wpi/v1/rum' ),
-            'tokenEndpoint' => rest_url( 'wpi/v1/rum-token' ),
+        wp_enqueue_script( 'pfc-web-vitals', PFC_URL . 'assets/vendor/web-vitals/web-vitals.iife.js', array(), '6.2.1', true );
+        wp_enqueue_script( 'pfc-rum', PFC_URL . 'assets/js/rum.js', array( 'pfc-web-vitals' ), PFC_VERSION, true );
+        wp_localize_script( 'pfc-rum', 'pfcRum', array(
+            'endpoint' => rest_url( 'pfc/v1/rum' ),
+            'tokenEndpoint' => rest_url( 'pfc/v1/rum-token' ),
             'rate' => $rate,
-            'route_group' => WPI_Utils::route_group(),
+            'route_group' => PFC_Utils::route_group(),
         ) );
     }
 
     public static function rum_token( WP_REST_Request $req ) {
-        if ( ! self::rate_limit( 'token', 30 ) ) { return new WP_Error( 'wpi_rum_rate', __( 'RUM token rate limit reached.', 'wp-performance-inspector' ), array( 'status' => 429 ) ); }
+        if ( ! self::rate_limit( 'token', 30 ) ) { return new WP_Error( 'pfc_rum_rate', __( 'RUM token rate limit reached.', 'performance-console' ), array( 'status' => 429 ) ); }
         $route = self::clean_route_group( $req->get_param( 'route_group' ) );
         $nonce = wp_generate_password( 24, false, false );
         $expires = time() + 10 * MINUTE_IN_SECONDS;
-        $secret = (string) get_option( 'wpi_secret' );
+        $secret = (string) get_option( 'pfc_secret' );
         $token = hash_hmac( 'sha256', 'rum|' . $nonce . '|' . $route . '|' . $expires, $secret );
-        set_transient( 'wpi_rum_' . md5( $nonce ), array( 'route' => $route, 'expires' => $expires ), 10 * MINUTE_IN_SECONDS );
+        set_transient( 'pfc_rum_' . md5( $nonce ), array( 'route' => $route, 'expires' => $expires ), 10 * MINUTE_IN_SECONDS );
         $response = new WP_REST_Response( array( 'nonce' => $nonce, 'token' => $token, 'expires' => $expires, 'route_group' => $route ) );
         $response->header( 'Cache-Control', 'no-store, private, max-age=0' );
         return $response;
@@ -127,8 +127,8 @@ final class WPI_REST {
 
     public static function rum( WP_REST_Request $req ) {
         $m = $req->get_json_params();
-        if ( ! self::rate_limit( 'ingest', 60 ) ) { return new WP_Error( 'wpi_rum_rate', __( 'RUM ingestion rate limit reached.', 'wp-performance-inspector' ), array( 'status' => 429 ) ); }
-        if ( ! is_array( $m ) || ! self::valid_rum_token( $m ) ) { return new WP_Error( 'wpi_rum_token', __( 'Invalid or expired RUM token.', 'wp-performance-inspector' ), array( 'status' => 403 ) ); }
+        if ( ! self::rate_limit( 'ingest', 60 ) ) { return new WP_Error( 'pfc_rum_rate', __( 'RUM ingestion rate limit reached.', 'performance-console' ), array( 'status' => 429 ) ); }
+        if ( ! is_array( $m ) || ! self::valid_rum_token( $m ) ) { return new WP_Error( 'pfc_rum_token', __( 'Invalid or expired RUM token.', 'performance-console' ), array( 'status' => 403 ) ); }
         $route_group = self::clean_route_group( $m['route_group'] ?? '' );
         $metric_version = 2 === (int) ( $m['metric_version'] ?? 1 ) ? 2 : 1;
         $hash = md5( $metric_version . '|' . $route_group );
@@ -142,7 +142,7 @@ final class WPI_REST {
         if ( ! $values ) { return rest_ensure_response( array( 'ok' => true, 'stored' => 0 ) ); }
 
         global $wpdb;
-        $table = WPI_Utils::table( 'metrics' );
+        $table = PFC_Utils::table( 'metrics' );
         foreach ( $values as $metric => $value ) {
             $bucket_index = self::metric_bucket( $metric, $value );
             $bucket_column = 'bucket_' . $bucket_index;
@@ -153,16 +153,16 @@ final class WPI_REST {
     }
 
     private static function valid_rum_token( array $payload ) {
-        $secret = (string) get_option( 'wpi_secret' );
+        $secret = (string) get_option( 'pfc_secret' );
         $token = sanitize_text_field( (string) ( $payload['token'] ?? '' ) );
         $nonce = sanitize_text_field( (string) ( $payload['nonce'] ?? '' ) );
         $expires = absint( $payload['expires'] ?? 0 );
         $route = self::clean_route_group( $payload['route_group'] ?? '' );
         if ( ! $secret || ! preg_match( '/^[A-Za-z0-9]{12,40}$/', $nonce ) || ! $token || $expires < time() || $expires > time() + 11 * MINUTE_IN_SECONDS ) { return false; }
-        $stored = get_transient( 'wpi_rum_' . md5( $nonce ) );
+        $stored = get_transient( 'pfc_rum_' . md5( $nonce ) );
         if ( ! is_array( $stored ) || $route !== (string) ( $stored['route'] ?? '' ) || $expires !== (int) ( $stored['expires'] ?? 0 ) ) { return false; }
         if ( ! hash_equals( hash_hmac( 'sha256', 'rum|' . $nonce . '|' . $route . '|' . $expires, $secret ), $token ) ) { return false; }
-        delete_transient( 'wpi_rum_' . md5( $nonce ) );
+        delete_transient( 'pfc_rum_' . md5( $nonce ) );
         return true;
     }
 
@@ -179,7 +179,7 @@ final class WPI_REST {
 
     private static function rate_limit( $scope, $limit ) {
         $ip = sanitize_text_field( (string) ( $_SERVER['REMOTE_ADDR'] ?? 'unknown' ) );
-        $key = 'wpi_rl_' . sanitize_key( $scope ) . '_' . md5( $ip . '|' . (string) get_option( 'wpi_secret' ) );
+        $key = 'pfc_rl_' . sanitize_key( $scope ) . '_' . md5( $ip . '|' . (string) get_option( 'pfc_secret' ) );
         $count = (int) get_transient( $key );
         if ( $count >= $limit ) { return false; }
         set_transient( $key, $count + 1, 10 * MINUTE_IN_SECONDS );
@@ -190,14 +190,14 @@ final class WPI_REST {
         self::load_diagnostics();
         $name = sanitize_text_field( $req->get_param( 'option' ) );
         $enable = (bool) $req->get_param( 'autoload' );
-        if ( '' === $name || WPI_Database_Repair::protected_option( $name ) ) { return new WP_Error( 'wpi_protected', 'This option is protected.', array( 'status' => 400 ) ); }
+        if ( '' === $name || PFC_Database_Repair::protected_option( $name ) ) { return new WP_Error( 'pfc_protected', 'This option is protected.', array( 'status' => 400 ) ); }
         global $wpdb;
         $before = $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name=%s", $name ) );
-        if ( null === $before ) { return new WP_Error( 'wpi_missing', 'Option not found.', array( 'status' => 404 ) ); }
+        if ( null === $before ) { return new WP_Error( 'pfc_missing', 'Option not found.', array( 'status' => 404 ) ); }
         if ( function_exists( 'wp_set_option_autoload' ) ) { $ok = wp_set_option_autoload( $name, $enable ); }
         else { $ok = false !== $wpdb->update( $wpdb->options, array( 'autoload' => $enable ? 'yes' : 'no' ), array( 'option_name' => $name ) ); }
         if ( $ok ) {
-            $wpdb->insert( WPI_Utils::table( 'changes' ), array( 'created_at' => WPI_Utils::now_mysql(), 'change_type' => 'autoload', 'object_name' => $name, 'before_value' => (string) $before, 'after_value' => $enable ? 'yes' : 'no', 'user_id' => get_current_user_id() ) );
+            $wpdb->insert( PFC_Utils::table( 'changes' ), array( 'created_at' => PFC_Utils::now_mysql(), 'change_type' => 'autoload', 'object_name' => $name, 'before_value' => (string) $before, 'after_value' => $enable ? 'yes' : 'no', 'user_id' => get_current_user_id() ) );
         }
         return rest_ensure_response( array( 'ok' => (bool) $ok ) );
     }

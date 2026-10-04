@@ -1,14 +1,14 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_Utils {
+final class PFC_Utils {
     private static $issue_source = 'passive';
     private static $issue_run_id = 0;
     private static $collected_incidents = array();
 
     public static function table( $suffix ) {
         global $wpdb;
-        return $wpdb->prefix . 'wpi_' . preg_replace( '/[^a-z0-9_]/', '', strtolower( $suffix ) );
+        return $wpdb->prefix . 'pfc_' . preg_replace( '/[^a-z0-9_]/', '', strtolower( $suffix ) );
     }
 
     public static function now_mysql() { return current_time( 'mysql', true ); }

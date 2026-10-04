@@ -15,7 +15,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: mbstring
       - run: find includes mu-plugin tests -name '*.php' -print0 | xargs -0 -n1 php -l
-      - run: php -l wp-performance-inspector.php
+      - run: php -l performance-console.php
       - run: php -l uninstall.php
       - run: php tests/run.php
   javascript:

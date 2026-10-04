@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    if (!window.performance || !window.wpiRum || !window.webVitals || Math.random() >= Number(wpiRum.rate || 0)) { return; }
+    if (!window.performance || !window.pfcRum || !window.webVitals || Math.random() >= Number(pfcRum.rate || 0)) { return; }
 
     var metrics = {};
     var token = null;
@@ -13,7 +13,7 @@
         if (pending || sent) { return; }
         pending = true;
         var startedGeneration = generation;
-        fetch(wpiRum.tokenEndpoint + '?route_group=' + encodeURIComponent(wpiRum.route_group), {
+        fetch(pfcRum.tokenEndpoint + '?route_group=' + encodeURIComponent(pfcRum.route_group), {
             credentials: 'omit', cache: 'no-store', keepalive: true, headers: { 'Accept': 'application/json' }
         }).then(function (response) {
             if (!response.ok) { throw new Error('RUM token unavailable'); }
@@ -44,9 +44,9 @@
         if (!token || Number(token.expires) * 1000 <= Date.now()) { getToken(); return; }
         try {
             var body = JSON.stringify(Object.assign({}, token, metrics, { metric_version: 2 }));
-            var queued = navigator.sendBeacon && navigator.sendBeacon(wpiRum.endpoint, new Blob([body], { type: 'application/json' }));
+            var queued = navigator.sendBeacon && navigator.sendBeacon(pfcRum.endpoint, new Blob([body], { type: 'application/json' }));
             if (!queued) {
-                fetch(wpiRum.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true, credentials: 'omit' }).catch(function () {});
+                fetch(pfcRum.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true, credentials: 'omit' }).catch(function () {});
             }
             sent = true;
         } catch (error) {}

@@ -4,7 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 /**
  * Database health diagnostics. Expensive operations are gated behind deep mode.
  */
-final class WPI_Database_Health {
+final class PFC_Database_Health {
     const LARGE_TABLE_ROWS = 2000000;
 
     public static function inspect( $deep = false, $force_large = false ) {
@@ -66,7 +66,7 @@ final class WPI_Database_Health {
 
     /**
      * Return live storage-engine support plus conservative maintenance capabilities.
-     * Capabilities describe what WPI is willing to offer, not every statement a server
+     * Capabilities describe what Performance Console is willing to offer, not every statement a server
      * might technically accept. Unknown/plugin engines remain diagnostic-only.
      */
     public static function storage_engine_support() {
@@ -113,7 +113,7 @@ final class WPI_Database_Health {
             'transactional' => false,
             'automatic_repair' => false,
             'recovery' => 'manual',
-            'notes' => 'Unknown or plugin-provided storage engine. WPI will inspect metadata but will not run maintenance statements automatically.',
+            'notes' => 'Unknown or plugin-provided storage engine. Performance Console will inspect metadata but will not run maintenance statements automatically.',
         );
         switch ( $engine ) {
             case 'innodb':
@@ -149,30 +149,30 @@ final class WPI_Database_Health {
                 $cap['repair'] = true;
                 $cap['optimize'] = true;
                 $cap['recovery'] = 'repair-table';
-                $cap['notes'] = 'ARCHIVE supports CHECK/REPAIR and OPTIMIZE on common MySQL/MariaDB versions. WPI treats repair as reviewed maintenance.';
+                $cap['notes'] = 'ARCHIVE supports CHECK/REPAIR and OPTIMIZE on common MySQL/MariaDB versions. Performance Console treats repair as reviewed maintenance.';
                 break;
             case 'csv':
                 $cap['check'] = true;
                 $cap['repair'] = true;
                 $cap['recovery'] = 'repair-table-data-loss-risk';
-                $cap['notes'] = 'CSV supports CHECK/REPAIR, but repair may discard rows after the first damaged record. WPI will diagnose it but will not offer automatic web repair.';
+                $cap['notes'] = 'CSV supports CHECK/REPAIR, but repair may discard rows after the first damaged record. Performance Console will diagnose it but will not offer automatic web repair.';
                 break;
             case 'memory':
             case 'heap':
-                $cap['notes'] = 'MEMORY tables are non-durable and server-memory backed. WPI inspects size/schema but does not offer repair/rebuild actions.';
+                $cap['notes'] = 'MEMORY tables are non-durable and server-memory backed. Performance Console inspects size/schema but does not offer repair/rebuild actions.';
                 break;
             case 'ndb':
             case 'ndbcluster':
                 $cap['analyze'] = true;
                 $cap['transactional'] = true;
                 $cap['recovery'] = 'cluster-tooling';
-                $cap['notes'] = 'NDB is cluster-managed. WPI can inspect metadata and ANALYZE support but leaves recovery and topology operations to NDB tooling.';
+                $cap['notes'] = 'NDB is cluster-managed. Performance Console can inspect metadata and ANALYZE support but leaves recovery and topology operations to NDB tooling.';
                 break;
             case 'rocksdb':
             case 'myrocks':
                 $cap['transactional'] = true;
                 $cap['recovery'] = 'engine-tooling';
-                $cap['notes'] = 'RocksDB/MyRocks is plugin/variant-specific. WPI remains diagnostic-only for repair/optimize unless the server reports a known safe path.';
+                $cap['notes'] = 'RocksDB/MyRocks is plugin/variant-specific. Performance Console remains diagnostic-only for repair/optimize unless the server reports a known safe path.';
                 break;
         }
         return $cap;
@@ -271,14 +271,14 @@ final class WPI_Database_Health {
                 'lock_structs' => absint( $trx['trx_lock_structs'] ?? 0 ),
                 'rows_locked' => absint( $trx['trx_rows_locked'] ?? 0 ),
                 'rows_modified' => absint( $trx['trx_rows_modified'] ?? 0 ),
-                'query' => WPI_Utils::normalize_sql( (string) ( $trx['trx_query'] ?? '' ) ),
+                'query' => PFC_Utils::normalize_sql( (string) ( $trx['trx_query'] ?? '' ) ),
                 'process_user' => sanitize_text_field( (string) ( $trx['process_user'] ?? '' ) ),
                 'process_host' => sanitize_text_field( (string) ( $trx['process_host'] ?? '' ) ),
                 'process_db' => sanitize_text_field( (string) ( $trx['process_db'] ?? '' ) ),
                 'process_command' => sanitize_text_field( (string) ( $trx['process_command'] ?? '' ) ),
                 'process_time' => isset( $trx['process_time'] ) ? max( 0, (int) $trx['process_time'] ) : null,
                 'process_state' => sanitize_text_field( (string) ( $trx['process_state'] ?? '' ) ),
-                'process_info' => WPI_Utils::normalize_sql( (string) ( $trx['process_info'] ?? '' ) ),
+                'process_info' => PFC_Utils::normalize_sql( (string) ( $trx['process_info'] ?? '' ) ),
             );
         }
         $lock_wait_count = null;
@@ -321,7 +321,7 @@ final class WPI_Database_Health {
         foreach ( preg_split( '/\r?\n/', $section ) as $line ) {
             $line = trim( (string) $line );
             if ( ! preg_match( '/^(SELECT|UPDATE|INSERT|DELETE|REPLACE)\b/i', $line ) ) { continue; }
-            $normalized = WPI_Utils::normalize_sql( mb_substr( $line, 0, 2000 ) );
+            $normalized = PFC_Utils::normalize_sql( mb_substr( $line, 0, 2000 ) );
             if ( $normalized && ! in_array( $normalized, $queries, true ) ) { $queries[] = $normalized; }
             if ( count( $queries ) >= 6 ) { break; }
         }
@@ -396,7 +396,7 @@ final class WPI_Database_Health {
             'lock_none' => $inplace,
             'instant' => $instant,
             'fail_closed' => true,
-            'notes' => $inplace ? 'WPI can request ALGORITHM=INPLACE, LOCK=NONE for supported InnoDB maintenance. It never silently falls back to ALGORITHM=COPY.' : 'Server version is too old or unrecognized for WPI to offer online InnoDB rebuild operations.',
+            'notes' => $inplace ? 'Performance Console can request ALGORITHM=INPLACE, LOCK=NONE for supported InnoDB maintenance. It never silently falls back to ALGORITHM=COPY.' : 'Server version is too old or unrecognized for Performance Console to offer online InnoDB rebuild operations.',
         );
     }
 
@@ -463,7 +463,7 @@ final class WPI_Database_Health {
                     'command' => sanitize_text_field( $row['Command'] ?? '' ),
                     'state'   => sanitize_text_field( $state ),
                     'db'      => sanitize_text_field( $row['db'] ?? $row['Db'] ?? '' ),
-                    'query'   => WPI_Utils::normalize_sql( $query ),
+                    'query'   => PFC_Utils::normalize_sql( $query ),
                 );
             }
         }
@@ -987,7 +987,7 @@ final class WPI_Database_Health {
         $autoload_where = "autoload IN ('yes','on','auto-on','auto')";
         $total = (int) $wpdb->get_var( "SELECT COALESCE(SUM(LENGTH(option_value)),0) FROM {$wpdb->options} WHERE {$autoload_where}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->options} WHERE {$autoload_where}" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        $usage = WPI_Utils::table( 'option_usage' );
+        $usage = PFC_Utils::table( 'option_usage' );
         $largest = $wpdb->get_results( "SELECT o.option_name,LENGTH(o.option_value) bytes,o.autoload,u.last_seen,u.hits,u.sampled_requests FROM {$wpdb->options} o LEFT JOIN {$usage} u ON u.option_name=o.option_name WHERE o.autoload IN ('yes','on','auto-on','auto') ORDER BY bytes DESC LIMIT 100", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
         // Production-safe bounded evidence. Deep mode may replace these caps with exact counts.
@@ -1012,56 +1012,56 @@ final class WPI_Database_Health {
             'expired_transients_capped' => $expired_capped,
             'transient_rows' => $transients,
             'transient_rows_capped' => $transients_capped,
-            'usage_started_at' => (int) get_option( 'wpi_usage_started_at', 0 ),
-            'usage_coverage' => WPI_Utils::autoload_usage_coverage(),
+            'usage_started_at' => (int) get_option( 'pfc_usage_started_at', 0 ),
+            'usage_coverage' => PFC_Utils::autoload_usage_coverage(),
         );
     }
 
     public static function generate_issues( array $health ) {
         $schema = $health['schema'];
         foreach ( $schema['missing_core_tables'] as $table ) {
-            WPI_Utils::issue( 'database', 'critical', 'Required WordPress table is missing', '<code>' . esc_html( $table ) . '</code> was not found.', 'Database functionality can fail', 'Restore the missing table from a known-good backup or investigate a failed migration before making other performance changes.' );
+            PFC_Utils::issue( 'database', 'critical', 'Required WordPress table is missing', '<code>' . esc_html( $table ) . '</code> was not found.', 'Database functionality can fail', 'Restore the missing table from a known-good backup or investigate a failed migration before making other performance changes.' );
         }
         foreach ( array_slice( $schema['missing_core_columns'] ?? array(), 0, 20 ) as $item ) {
-            WPI_Utils::issue( 'database', 'critical', 'WordPress core database column is missing', '<code>' . esc_html( $item['table'] . '.' . $item['column'] ) . '</code> is not present.', 'Core queries or updates can fail', 'Use the Database Repair Centre to add the exact column definition from this installed WordPress version. Large tables use the guarded Maintenance Fix workflow or WP-CLI during a maintenance window.' );
+            PFC_Utils::issue( 'database', 'critical', 'WordPress core database column is missing', '<code>' . esc_html( $item['table'] . '.' . $item['column'] ) . '</code> is not present.', 'Core queries or updates can fail', 'Use the Database Repair Centre to add the exact column definition from this installed WordPress version. Large tables use the guarded Maintenance Fix workflow or WP-CLI during a maintenance window.' );
         }
         foreach ( array_slice( $schema['missing_core_indexes'], 0, 20 ) as $item ) {
-            WPI_Utils::issue( 'database', 'high', 'Core database index appears to be missing', '<code>' . esc_html( $item['table'] . '.' . $item['index'] ) . '</code> is not present.', 'Queries using this key can degrade sharply as the table grows', 'Use the Database Repair Centre to restore the exact index definition from this installed WordPress version. Large-table ALTER operations are size-gated.' );
+            PFC_Utils::issue( 'database', 'high', 'Core database index appears to be missing', '<code>' . esc_html( $item['table'] . '.' . $item['index'] ) . '</code> is not present.', 'Queries using this key can degrade sharply as the table grows', 'Use the Database Repair Centre to restore the exact index definition from this installed WordPress version. Large-table ALTER operations are size-gated.' );
         }
         foreach ( array_slice( $schema['mismatched_core_columns'] ?? array(), 0, 20 ) as $item ) {
-            WPI_Utils::issue( 'database', 'critical', 'WordPress core database column definition does not match core', '<code>' . esc_html( $item['table'] . '.' . $item['column'] ) . '</code> differs from the definition expected by this WordPress version. Drift: <code>' . esc_html( wp_json_encode( $item['drift'] ) ) . '</code>.', 'Core reads/writes or upgrades may fail or behave incorrectly', 'Open Database Repair Centre to revalidate this against the installed WordPress schema. WPI can apply eligible corrections after a verified backup/risk acknowledgement and verify them afterward; large tables use the guarded Maintenance Fix workflow or WP-CLI.' );
+            PFC_Utils::issue( 'database', 'critical', 'WordPress core database column definition does not match core', '<code>' . esc_html( $item['table'] . '.' . $item['column'] ) . '</code> differs from the definition expected by this WordPress version. Drift: <code>' . esc_html( wp_json_encode( $item['drift'] ) ) . '</code>.', 'Core reads/writes or upgrades may fail or behave incorrectly', 'Open Database Repair Centre to revalidate this against the installed WordPress schema. Performance Console can apply eligible corrections after a verified backup/risk acknowledgement and verify them afterward; large tables use the guarded Maintenance Fix workflow or WP-CLI.' );
         }
         foreach ( array_slice( $schema['mismatched_core_indexes'] ?? array(), 0, 20 ) as $item ) {
-            WPI_Utils::issue( 'database', 'high', 'WordPress core index definition does not match core', '<code>' . esc_html( $item['table'] . '.' . $item['index'] ) . '</code> exists with a different key definition. Live: <code>' . esc_html( $item['actual'] ) . '</code>. Expected: <code>' . esc_html( $item['definition'] ) . '</code>.', 'Queries may use the wrong key shape or upgrades may not match expected schema', 'Open Database Repair Centre. WPI can revalidate the expected/live definitions, preflight primary/unique keys for duplicates, rebuild eligible core indexes, and verify the result. Large tables use the guarded Maintenance Fix workflow or WP-CLI during maintenance.' );
+            PFC_Utils::issue( 'database', 'high', 'WordPress core index definition does not match core', '<code>' . esc_html( $item['table'] . '.' . $item['index'] ) . '</code> exists with a different key definition. Live: <code>' . esc_html( $item['actual'] ) . '</code>. Expected: <code>' . esc_html( $item['definition'] ) . '</code>.', 'Queries may use the wrong key shape or upgrades may not match expected schema', 'Open Database Repair Centre. Performance Console can revalidate the expected/live definitions, preflight primary/unique keys for duplicates, rebuild eligible core indexes, and verify the result. Large tables use the guarded Maintenance Fix workflow or WP-CLI during maintenance.' );
         }
         if ( ! empty( $schema['tables_without_primary_key'] ) ) {
-            WPI_Utils::issue( 'database', 'high', 'Large database tables have no primary key', esc_html( implode( ', ', array_slice( $schema['tables_without_primary_key'], 0, 10 ) ) ), 'Replication, row lookup and maintenance may scale poorly', 'Identify the owning plugin and add an appropriate primary/unique key only after reviewing its schema and duplicate rows.' );
+            PFC_Utils::issue( 'database', 'high', 'Large database tables have no primary key', esc_html( implode( ', ', array_slice( $schema['tables_without_primary_key'], 0, 10 ) ) ), 'Replication, row lookup and maintenance may scale poorly', 'Identify the owning plugin and add an appropriate primary/unique key only after reviewing its schema and duplicate rows.' );
         }
         foreach ( array_slice( $schema['duplicate_indexes'] ?? array(), 0, 20 ) as $duplicate ) {
-            WPI_Utils::issue( 'database', 'warning', 'Table has exact duplicate indexes', '<code>' . esc_html( $duplicate['table'] ) . '</code> contains equivalent indexes: <code>' . esc_html( implode( ', ', $duplicate['indexes'] ) ) . '</code>.', 'Unnecessary index storage and write amplification', 'Open Database Repair Centre. WPI rechecks the exact index signatures before dropping a redundant non-primary index, requires backup/risk acknowledgement, and verifies the retained index afterward.' );
+            PFC_Utils::issue( 'database', 'warning', 'Table has exact duplicate indexes', '<code>' . esc_html( $duplicate['table'] ) . '</code> contains equivalent indexes: <code>' . esc_html( implode( ', ', $duplicate['indexes'] ) ) . '</code>.', 'Unnecessary index storage and write amplification', 'Open Database Repair Centre. Performance Console rechecks the exact index signatures before dropping a redundant non-primary index, requires backup/risk acknowledgement, and verifies the retained index afterward.' );
         }
         foreach ( array_slice( $schema['auto_increment_risks'] ?? array(), 0, 20 ) as $risk ) {
-            WPI_Utils::issue( 'database', $risk['percent'] >= 90 ? 'critical' : 'high', 'Auto-increment column is approaching its numeric limit', '<code>' . esc_html( $risk['table'] . '.' . $risk['column'] ) . '</code> is using approximately ' . esc_html( $risk['percent'] ) . '% of the range for <code>' . esc_html( $risk['type'] ) . '</code>.', $risk['percent'] . '% of ID range', 'Plan a controlled column-type migration before inserts begin failing. This plugin will not automatically widen identifier columns on a production database.' );
+            PFC_Utils::issue( 'database', $risk['percent'] >= 90 ? 'critical' : 'high', 'Auto-increment column is approaching its numeric limit', '<code>' . esc_html( $risk['table'] . '.' . $risk['column'] ) . '</code> is using approximately ' . esc_html( $risk['percent'] ) . '% of the range for <code>' . esc_html( $risk['type'] ) . '</code>.', $risk['percent'] . '% of ID range', 'Plan a controlled column-type migration before inserts begin failing. This plugin will not automatically widen identifier columns on a production database.' );
         }
         $nonempty_collations = array_filter( $schema['collations'] ?? array(), static function ( $count, $name ) { return '' !== (string) $name && (int) $count > 0; }, ARRAY_FILTER_USE_BOTH );
         if ( count( $nonempty_collations ) > 2 ) {
-            WPI_Utils::issue( 'database', 'warning', 'Database tables use several collations', esc_html( implode( ', ', array_keys( array_slice( $nonempty_collations, 0, 6, true ) ) ) ), count( $nonempty_collations ) . ' collations detected', 'Mixed collations are not automatically wrong, but joins/comparisons across incompatible collations can add conversions or produce errors. Standardize plugin tables only after checking their requirements.' );
+            PFC_Utils::issue( 'database', 'warning', 'Database tables use several collations', esc_html( implode( ', ', array_keys( array_slice( $nonempty_collations, 0, 6, true ) ) ) ), count( $nonempty_collations ) . ' collations detected', 'Mixed collations are not automatically wrong, but joins/comparisons across incompatible collations can add conversions or produce errors. Standardize plugin tables only after checking their requirements.' );
         }
 
         foreach ( $schema['tables'] as $table ) {
             if ( $table['rows_estimate'] > 100000 && $table['engine'] && 0 !== strcasecmp( $table['engine'], 'InnoDB' ) ) {
-                WPI_Utils::issue( 'database', 'warning', 'Large table is not using InnoDB', '<code>' . esc_html( $table['name'] ) . '</code> uses ' . esc_html( $table['engine'] ) . '.', number_format_i18n( $table['rows_estimate'] ) . ' estimated rows', 'Review the plugin/application requirements and consider InnoDB on staging. Do not convert a large production table without a migration plan.' );
+                PFC_Utils::issue( 'database', 'warning', 'Large table is not using InnoDB', '<code>' . esc_html( $table['name'] ) . '</code> uses ' . esc_html( $table['engine'] ) . '.', number_format_i18n( $table['rows_estimate'] ) . ' estimated rows', 'Review the plugin/application requirements and consider InnoDB on staging. Do not convert a large production table without a migration plan.' );
             }
             if ( $table['size'] > 100 * MB_IN_BYTES && $table['data_free'] > max( 100 * MB_IN_BYTES, $table['size'] * 0.25 ) ) {
-                WPI_Utils::issue( 'database', 'warning', 'Table has substantial reclaimable/fragmented space', '<code>' . esc_html( $table['name'] ) . '</code> reports ' . esc_html( size_format( $table['data_free'] ) ) . ' of free space.', size_format( $table['data_free'] ), 'Investigate churn first. If reclaiming the space is justified, use the Repair Centre maintenance workflow after a verified backup, or WP-CLI/DBA tooling for the largest table.' );
+                PFC_Utils::issue( 'database', 'warning', 'Table has substantial reclaimable/fragmented space', '<code>' . esc_html( $table['name'] ) . '</code> reports ' . esc_html( size_format( $table['data_free'] ) ) . ' of free space.', size_format( $table['data_free'] ), 'Investigate churn first. If reclaiming the space is justified, use the Repair Centre maintenance workflow after a verified backup, or WP-CLI/DBA tooling for the largest table.' );
             }
             $comment = strtolower( $table['comment'] );
             if ( false !== strpos( $comment, 'crash' ) || false !== strpos( $comment, 'corrupt' ) ) {
-                WPI_Utils::issue( 'database', 'critical', 'Database reports a damaged table', '<code>' . esc_html( $table['name'] ) . '</code>: ' . esc_html( $table['comment'] ), 'Potential data/query failures', 'Open Database Repair Centre, create or select a verified backup, and use the engine-specific guided recovery plan. If WPI cannot safely automate the engine recovery, it will show the exact reviewed procedure instead of issuing a generic repair.' );
+                PFC_Utils::issue( 'database', 'critical', 'Database reports a damaged table', '<code>' . esc_html( $table['name'] ) . '</code>: ' . esc_html( $table['comment'] ), 'Potential data/query failures', 'Open Database Repair Centre, create or select a verified backup, and use the engine-specific guided recovery plan. If Performance Console cannot safely automate the engine recovery, it will show the exact reviewed procedure instead of issuing a generic repair.' );
             }
         }
         foreach ( $health['integrity']['problems'] as $problem ) {
-            WPI_Utils::issue( 'database', 'critical', 'Database integrity check reported a problem', '<code>' . esc_html( $problem['table'] ) . '</code>: ' . esc_html( $problem['message'] ), 'Potential data corruption', 'Open Database Repair Centre, create or select a verified backup, build the engine-specific recovery plan, and apply the guarded repair when WPI can verify a safe path.' );
+            PFC_Utils::issue( 'database', 'critical', 'Database integrity check reported a problem', '<code>' . esc_html( $problem['table'] ) . '</code>: ' . esc_html( $problem['message'] ), 'Potential data corruption', 'Open Database Repair Centre, create or select a verified backup, build the engine-specific recovery plan, and apply the guarded repair when Performance Console can verify a safe path.' );
         }
 
         $s = $health['server']['status'];
@@ -1069,41 +1069,41 @@ final class WPI_Database_Health {
         $tmp = (float) ( $s['Created_tmp_tables'] ?? 0 );
         $disk = (float) ( $s['Created_tmp_disk_tables'] ?? 0 );
         if ( $tmp > 100 && $disk / $tmp > 0.25 ) {
-            WPI_Utils::issue( 'database', 'high', 'Many MySQL temporary tables are spilling to disk', round( 100 * $disk / $tmp, 1 ) . '% of created temporary tables have been disk-based since server start.', round( 100 * $disk / $tmp, 1 ) . '% disk temp tables', 'Find queries using large GROUP BY/ORDER BY/temp results before blindly increasing tmp_table_size/max_heap_table_size.' );
+            PFC_Utils::issue( 'database', 'high', 'Many MySQL temporary tables are spilling to disk', round( 100 * $disk / $tmp, 1 ) . '% of created temporary tables have been disk-based since server start.', round( 100 * $disk / $tmp, 1 ) . '% disk temp tables', 'Find queries using large GROUP BY/ORDER BY/temp results before blindly increasing tmp_table_size/max_heap_table_size.' );
         }
         $requests = (float) ( $s['Innodb_buffer_pool_read_requests'] ?? 0 );
         $reads = (float) ( $s['Innodb_buffer_pool_reads'] ?? 0 );
         if ( $requests > 10000 ) {
             $hit = 1 - ( $reads / max( 1, $requests ) );
             if ( $hit < 0.99 ) {
-                WPI_Utils::issue( 'database', 'high', 'InnoDB buffer pool hit rate is low', 'Calculated buffer pool hit rate is approximately ' . esc_html( round( $hit * 100, 2 ) ) . '%.', round( $hit * 100, 2 ) . '% hit rate', 'Confirm the working dataset and server memory pressure. A larger InnoDB buffer pool may help, but query/index problems should be addressed first.' );
+                PFC_Utils::issue( 'database', 'high', 'InnoDB buffer pool hit rate is low', 'Calculated buffer pool hit rate is approximately ' . esc_html( round( $hit * 100, 2 ) ) . '%.', round( $hit * 100, 2 ) . '% hit rate', 'Confirm the working dataset and server memory pressure. A larger InnoDB buffer pool may help, but query/index problems should be addressed first.' );
             }
         }
         $max_conn = (float) ( $v['max_connections'] ?? 0 );
         $used_conn = (float) ( $s['Max_used_connections'] ?? 0 );
         if ( $max_conn > 0 && $used_conn / $max_conn > 0.8 ) {
-            WPI_Utils::issue( 'database', 'high', 'Database connection capacity has been close to exhaustion', 'Max_used_connections is ' . intval( $used_conn ) . ' of ' . intval( $max_conn ) . '.', round( 100 * $used_conn / $max_conn, 1 ) . '% of capacity', 'Investigate PHP-FPM concurrency, stuck queries, persistent connections and connection leaks before raising the limit.' );
+            PFC_Utils::issue( 'database', 'high', 'Database connection capacity has been close to exhaustion', 'Max_used_connections is ' . intval( $used_conn ) . ' of ' . intval( $max_conn ) . '.', round( 100 * $used_conn / $max_conn, 1 ) . '% of capacity', 'Investigate PHP-FPM concurrency, stuck queries, persistent connections and connection leaks before raising the limit.' );
         }
         $process = $health['server']['processes'];
         if ( ! empty( $process['locked'] ) ) {
-            WPI_Utils::issue( 'database', 'high', 'Database sessions are waiting on locks', intval( $process['locked'] ) . ' visible process(es) reported a lock-related state.', $process['locked'] . ' locked processes', 'Inspect the long-running process list and the transactions/queries holding locks.' );
+            PFC_Utils::issue( 'database', 'high', 'Database sessions are waiting on locks', intval( $process['locked'] ) . ' visible process(es) reported a lock-related state.', $process['locked'] . ' locked processes', 'Inspect the long-running process list and the transactions/queries holding locks.' );
         }
         $uptime = max( 1, (float) ( $s['Uptime'] ?? 1 ) );
         $days_up = max( 1 / 24, $uptime / DAY_IN_SECONDS );
         $slow_per_day = (float) ( $s['Slow_queries'] ?? 0 ) / $days_up;
         if ( $slow_per_day >= 100 ) {
-            WPI_Utils::issue( 'database', $slow_per_day >= 1000 ? 'high' : 'warning', 'MySQL is recording many slow queries', 'The server has recorded approximately ' . esc_html( number_format_i18n( (int) $slow_per_day ) ) . ' slow queries per day at the current uptime rate.', number_format_i18n( (int) $slow_per_day ) . '/day', 'Use signed route profiling and the database slow-query log together to identify the highest cumulative-cost query patterns.' );
+            PFC_Utils::issue( 'database', $slow_per_day >= 1000 ? 'high' : 'warning', 'MySQL is recording many slow queries', 'The server has recorded approximately ' . esc_html( number_format_i18n( (int) $slow_per_day ) ) . ' slow queries per day at the current uptime rate.', number_format_i18n( (int) $slow_per_day ) . '/day', 'Use signed route profiling and the database slow-query log together to identify the highest cumulative-cost query patterns.' );
         }
         $full_join_per_day = (float) ( $s['Select_full_join'] ?? 0 ) / $days_up;
         if ( $full_join_per_day >= 100 ) {
-            WPI_Utils::issue( 'database', 'warning', 'MySQL is performing joins without usable indexes', 'Select_full_join is accumulating at roughly ' . esc_html( number_format_i18n( (int) $full_join_per_day ) ) . ' per day.', number_format_i18n( (int) $full_join_per_day ) . '/day', 'Profile the slowest SELECTs and inspect EXPLAIN possible_keys/key output. Add indexes only when the query shape and write cost justify them.' );
+            PFC_Utils::issue( 'database', 'warning', 'MySQL is performing joins without usable indexes', 'Select_full_join is accumulating at roughly ' . esc_html( number_format_i18n( (int) $full_join_per_day ) ) . ' per day.', number_format_i18n( (int) $full_join_per_day ) . '/day', 'Profile the slowest SELECTs and inspect EXPLAIN possible_keys/key output. Add indexes only when the query shape and write cost justify them.' );
         }
         $aborted_per_day = (float) ( $s['Aborted_connects'] ?? 0 ) / $days_up;
         if ( $aborted_per_day >= 50 ) {
-            WPI_Utils::issue( 'database', 'warning', 'Database connections are being aborted frequently', 'Aborted_connects is accumulating at roughly ' . esc_html( number_format_i18n( (int) $aborted_per_day ) ) . ' per day.', number_format_i18n( (int) $aborted_per_day ) . '/day', 'Check credentials/network stability, max_connections pressure, PHP-FPM worker spikes and database connection timeouts.' );
+            PFC_Utils::issue( 'database', 'warning', 'Database connections are being aborted frequently', 'Aborted_connects is accumulating at roughly ' . esc_html( number_format_i18n( (int) $aborted_per_day ) ) . ' per day.', number_format_i18n( (int) $aborted_per_day ) . '/day', 'Check credentials/network stability, max_connections pressure, PHP-FPM worker spikes and database connection timeouts.' );
         }
         if ( ! empty( $s['Innodb_row_lock_current_waits'] ) ) {
-            WPI_Utils::issue( 'database', 'high', 'InnoDB currently has row-lock waits', intval( $s['Innodb_row_lock_current_waits'] ) . ' current row-lock wait(s) were reported.', intval( $s['Innodb_row_lock_current_waits'] ) . ' current waits', 'Use the process list and transaction diagnostics to identify the blocking transaction. Do not kill sessions blindly from WordPress.' );
+            PFC_Utils::issue( 'database', 'high', 'InnoDB currently has row-lock waits', intval( $s['Innodb_row_lock_current_waits'] ) . ' current row-lock wait(s) were reported.', intval( $s['Innodb_row_lock_current_waits'] ) . ' current waits', 'Use the process list and transaction diagnostics to identify the blocking transaction. Do not kill sessions blindly from WordPress.' );
         }
         $innodb = (array) ( $health['server']['innodb'] ?? array() );
         if ( ! empty( $innodb['deadlock_detected'] ) ) {
@@ -1111,19 +1111,19 @@ final class WPI_Database_Health {
             $detail = 'SHOW ENGINE INNODB STATUS contains a latest-detected-deadlock section.';
             if ( ! empty( $deadlock['tables'] ) ) { $detail .= ' Tables: <code>' . esc_html( implode( ', ', array_slice( (array) $deadlock['tables'], 0, 8 ) ) ) . '</code>.'; }
             if ( ! empty( $deadlock['queries'][0] ) ) { $detail .= ' Example normalized query: <code>' . esc_html( mb_substr( (string) $deadlock['queries'][0], 0, 700 ) ) . '</code>.'; }
-            WPI_Utils::issue( 'database', 'high', 'InnoDB reports a recent deadlock', $detail, 'Transaction rollback/retry risk', 'Use the parsed deadlock participants and lock graph to identify code paths that acquire the same rows in different orders. Shorten transactions and enforce a consistent write order.' );
+            PFC_Utils::issue( 'database', 'high', 'InnoDB reports a recent deadlock', $detail, 'Transaction rollback/retry risk', 'Use the parsed deadlock participants and lock graph to identify code paths that acquire the same rows in different orders. Shorten transactions and enforce a consistent write order.' );
         }
         if ( ! empty( $innodb['foreign_key_error_detected'] ) ) {
-            WPI_Utils::issue( 'database', 'high', 'InnoDB reports a recent foreign-key error', 'SHOW ENGINE INNODB STATUS contains a latest-foreign-key-error section.', 'Write failures possible', 'Inspect the owning plugin/custom table schema and the failing relationship before retrying the write.' );
+            PFC_Utils::issue( 'database', 'high', 'InnoDB reports a recent foreign-key error', 'SHOW ENGINE INNODB STATUS contains a latest-foreign-key-error section.', 'Write failures possible', 'Inspect the owning plugin/custom table schema and the failing relationship before retrying the write.' );
         }
         if ( isset( $innodb['history_list_length'] ) && null !== $innodb['history_list_length'] && $innodb['history_list_length'] > 100000 ) {
-            WPI_Utils::issue( 'database', 'warning', 'InnoDB purge history is very large', 'History list length is ' . number_format_i18n( (int) $innodb['history_list_length'] ) . '.', number_format_i18n( (int) $innodb['history_list_length'] ), 'Look for long-running transactions or replicas/readers holding old snapshots open. Persistent growth can increase undo/purge work.' );
+            PFC_Utils::issue( 'database', 'warning', 'InnoDB purge history is very large', 'History list length is ' . number_format_i18n( (int) $innodb['history_list_length'] ) . '.', number_format_i18n( (int) $innodb['history_list_length'] ), 'Look for long-running transactions or replicas/readers holding old snapshots open. Persistent growth can increase undo/purge work.' );
         }
         if ( isset( $innodb['lock_wait_count'] ) && null !== $innodb['lock_wait_count'] && (int) $innodb['lock_wait_count'] > 0 ) {
-            WPI_Utils::issue( 'database', 'high', 'InnoDB lock waits are active', number_format_i18n( (int) $innodb['lock_wait_count'] ) . ' lock wait(s) are visible through ' . esc_html( (string) ( $innodb['lock_wait_source'] ?? 'InnoDB metadata' ) ) . '.', number_format_i18n( (int) $innodb['lock_wait_count'] ) . ' wait(s)', 'Open Performance → InnoDB Transaction Manager to inspect live blockers/waiters and terminate a stuck or abandoned connection when appropriate. Then fix the code path so transactions are shorter and do not remain open across slow PHP/API work.' );
+            PFC_Utils::issue( 'database', 'high', 'InnoDB lock waits are active', number_format_i18n( (int) $innodb['lock_wait_count'] ) . ' lock wait(s) are visible through ' . esc_html( (string) ( $innodb['lock_wait_source'] ?? 'InnoDB metadata' ) ) . '.', number_format_i18n( (int) $innodb['lock_wait_count'] ) . ' wait(s)', 'Open Performance → InnoDB Transaction Manager to inspect live blockers/waiters and terminate a stuck or abandoned connection when appropriate. Then fix the code path so transactions are shorter and do not remain open across slow PHP/API work.' );
         }
         foreach ( array_slice( (array) ( $innodb['configuration_advice']['recommendations'] ?? array() ), 0, 10 ) as $advice ) {
-            WPI_Utils::issue( 'database', sanitize_key( $advice['severity'] ?? 'warning' ), sanitize_text_field( $advice['title'] ?? 'InnoDB configuration recommendation' ), esc_html( (string) ( $advice['detail'] ?? '' ) ), 'InnoDB configuration/workload', esc_html( (string) ( $advice['recommendation'] ?? '' ) ) );
+            PFC_Utils::issue( 'database', sanitize_key( $advice['severity'] ?? 'warning' ), sanitize_text_field( $advice['title'] ?? 'InnoDB configuration recommendation' ), esc_html( (string) ( $advice['detail'] ?? '' ) ), 'InnoDB configuration/workload', esc_html( (string) ( $advice['recommendation'] ?? '' ) ) );
         }
         foreach ( array_slice( (array) ( $innodb['lock_graph']['edges'] ?? array() ), 0, 5 ) as $edge ) {
             $detail = 'Transaction <code>' . esc_html( (string) ( $edge['requesting_trx_id'] ?? '' ) ) . '</code> is waiting on <code>' . esc_html( (string) ( $edge['blocking_trx_id'] ?? '' ) ) . '</code>';
@@ -1131,14 +1131,14 @@ final class WPI_Database_Health {
             if ( ! empty( $edge['index'] ) ) { $detail .= ' index <code>' . esc_html( (string) $edge['index'] ) . '</code>'; }
             $detail .= '.';
             if ( ! empty( $edge['blocking_query'] ) ) { $detail .= ' Blocking query: <code>' . esc_html( mb_substr( (string) $edge['blocking_query'], 0, 600 ) ) . '</code>.'; }
-            WPI_Utils::issue( 'database', 'high', 'InnoDB blocker/waiter relationship detected', $detail, 'Blocked transaction', 'Fix the blocking code path rather than automatically killing the connection. Reduce transaction duration, batch writes, and acquire rows in a consistent order.' );
+            PFC_Utils::issue( 'database', 'high', 'InnoDB blocker/waiter relationship detected', $detail, 'Blocked transaction', 'Fix the blocking code path rather than automatically killing the connection. Reduce transaction duration, batch writes, and acquire rows in a consistent order.' );
         }
         foreach ( array_slice( (array) ( $innodb['transactions'] ?? array() ), 0, 10 ) as $trx ) {
             $age = isset( $trx['age_seconds'] ) ? (int) $trx['age_seconds'] : 0;
             if ( $age < 30 ) { continue; }
             $detail = 'Transaction has been open for ' . $age . ' seconds; ' . intval( $trx['rows_locked'] ?? 0 ) . ' row(s) locked and ' . intval( $trx['rows_modified'] ?? 0 ) . ' row(s) modified.';
             if ( ! empty( $trx['query'] ) ) { $detail .= ' Query: <code>' . esc_html( mb_substr( (string) $trx['query'], 0, 600 ) ) . '</code>'; }
-            WPI_Utils::issue( 'database', $age >= 300 ? 'critical' : 'high', 'Long-running InnoDB transaction is open', $detail, $age . ' seconds', 'Open Performance → InnoDB Transaction Manager to inspect the owning connection. If it is stuck or abandoned, WPI can terminate the connection and roll back its uncommitted transaction after explicit acknowledgement. Then fix the request/job so it commits or rolls back sooner.' );
+            PFC_Utils::issue( 'database', $age >= 300 ? 'critical' : 'high', 'Long-running InnoDB transaction is open', $detail, $age . ' seconds', 'Open Performance → InnoDB Transaction Manager to inspect the owning connection. If it is stuck or abandoned, Performance Console can terminate the connection and roll back its uncommitted transaction after explicit acknowledgement. Then fix the request/job so it commits or rolls back sooner.' );
         }
 
         $engine_counts = array_change_key_case( (array) ( $schema['engines'] ?? array() ), CASE_LOWER );
@@ -1146,14 +1146,14 @@ final class WPI_Database_Health {
         $table_lock_immediate = (float) ( $s['Table_locks_immediate'] ?? 0 );
         $table_lock_total = $table_locks + $table_lock_immediate;
         if ( $table_lock_total > 1000 && $table_locks / max( 1, $table_lock_total ) > 0.01 && ( ! empty( $engine_counts['myisam'] ) || ! empty( $engine_counts['aria'] ) ) ) {
-            WPI_Utils::issue( 'database', 'high', 'Table-level lock contention is elevated', round( 100 * $table_locks / $table_lock_total, 2 ) . '% of recorded table-lock requests waited.', round( 100 * $table_locks / $table_lock_total, 2 ) . '% waited', 'Identify write-heavy MyISAM/Aria tables and the plugins using them. Reduce long writes/bulk operations; consider an engine migration on staging when the application permits it.' );
+            PFC_Utils::issue( 'database', 'high', 'Table-level lock contention is elevated', round( 100 * $table_locks / $table_lock_total, 2 ) . '% of recorded table-lock requests waited.', round( 100 * $table_locks / $table_lock_total, 2 ) . '% waited', 'Identify write-heavy MyISAM/Aria tables and the plugins using them. Reduce long writes/bulk operations; consider an engine migration on staging when the application permits it.' );
         }
         $key_requests = (float) ( $s['Key_read_requests'] ?? 0 );
         $key_reads = (float) ( $s['Key_reads'] ?? 0 );
         if ( ! empty( $engine_counts['myisam'] ) && $key_requests > 10000 ) {
             $key_hit = 1 - ( $key_reads / max( 1, $key_requests ) );
             if ( $key_hit < 0.99 ) {
-                WPI_Utils::issue( 'database', 'warning', 'MyISAM key-cache hit rate is low', 'Calculated MyISAM key-cache hit rate is approximately ' . esc_html( round( 100 * $key_hit, 2 ) ) . '%.', round( 100 * $key_hit, 2 ) . '% hit rate', 'Check which MyISAM tables are active and whether key_buffer_size is appropriate. For write-heavy WordPress/plugin tables, consider whether InnoDB is a better fit before simply increasing the cache.' );
+                PFC_Utils::issue( 'database', 'warning', 'MyISAM key-cache hit rate is low', 'Calculated MyISAM key-cache hit rate is approximately ' . esc_html( round( 100 * $key_hit, 2 ) ) . '%.', round( 100 * $key_hit, 2 ) . '% hit rate', 'Check which MyISAM tables are active and whether key_buffer_size is appropriate. For write-heavy WordPress/plugin tables, consider whether InnoDB is a better fit before simply increasing the cache.' );
             }
         }
         $aria_requests = (float) ( $s['Aria_pagecache_read_requests'] ?? 0 );
@@ -1161,7 +1161,7 @@ final class WPI_Database_Health {
         if ( ! empty( $engine_counts['aria'] ) && $aria_requests > 10000 ) {
             $aria_hit = 1 - ( $aria_reads / max( 1, $aria_requests ) );
             if ( $aria_hit < 0.99 ) {
-                WPI_Utils::issue( 'database', 'warning', 'Aria page-cache hit rate is low', 'Calculated Aria page-cache hit rate is approximately ' . esc_html( round( 100 * $aria_hit, 2 ) ) . '%.', round( 100 * $aria_hit, 2 ) . '% hit rate', 'Review Aria table workload and aria_pagecache_buffer_size. Do not tune the cache until slow queries and oversized/scan-heavy tables have been identified.' );
+                PFC_Utils::issue( 'database', 'warning', 'Aria page-cache hit rate is low', 'Calculated Aria page-cache hit rate is approximately ' . esc_html( round( 100 * $aria_hit, 2 ) ) . '%.', round( 100 * $aria_hit, 2 ) . '% hit rate', 'Review Aria table workload and aria_pagecache_buffer_size. Do not tune the cache until slow queries and oversized/scan-heavy tables have been identified.' );
             }
         }
         $memory_limit = (int) ( $v['max_heap_table_size'] ?? 0 );
@@ -1170,39 +1170,39 @@ final class WPI_Database_Health {
                 if ( 0 !== strcasecmp( (string) ( $table['engine'] ?? '' ), 'MEMORY' ) ) { continue; }
                 $size = (int) ( $table['size'] ?? 0 );
                 if ( $size >= 0.75 * $memory_limit ) {
-                    WPI_Utils::issue( 'database', 'high', 'MEMORY table is approaching max_heap_table_size', '<code>' . esc_html( $table['name'] ) . '</code> is approximately ' . esc_html( size_format( $size ) ) . ' versus max_heap_table_size ' . esc_html( size_format( $memory_limit ) ) . '.', round( 100 * $size / $memory_limit, 1 ) . '% of limit', 'Identify the owning plugin and its growth behavior. MEMORY tables are non-durable and can fail with table-full errors at their configured size ceiling.' );
+                    PFC_Utils::issue( 'database', 'high', 'MEMORY table is approaching max_heap_table_size', '<code>' . esc_html( $table['name'] ) . '</code> is approximately ' . esc_html( size_format( $size ) ) . ' versus max_heap_table_size ' . esc_html( size_format( $memory_limit ) ) . '.', round( 100 * $size / $memory_limit, 1 ) . '% of limit', 'Identify the owning plugin and its growth behavior. MEMORY tables are non-durable and can fail with table-full errors at their configured size ceiling.' );
                 }
             }
         }
         foreach ( array_slice( $process['long_running'] ?? array(), 0, 5 ) as $p ) {
-            WPI_Utils::issue( 'database', $p['time'] >= 30 ? 'critical' : 'high', 'Long-running database query is active', '<code>' . esc_html( mb_substr( $p['query'], 0, 800 ) ) . '</code><br>State: ' . esc_html( $p['state'] ), $p['time'] . ' seconds', 'Use EXPLAIN and the responsible request/plugin trace to reduce the query, add an appropriate index, or break the work into batches.' );
+            PFC_Utils::issue( 'database', $p['time'] >= 30 ? 'critical' : 'high', 'Long-running database query is active', '<code>' . esc_html( mb_substr( $p['query'], 0, 800 ) ) . '</code><br>State: ' . esc_html( $p['state'] ), $p['time'] . ' seconds', 'Use EXPLAIN and the responsible request/plugin trace to reduce the query, add an appropriate index, or break the work into batches.' );
         }
 
         $opt = $health['options'];
         if ( $opt['autoload_bytes'] > 2 * MB_IN_BYTES ) {
-            WPI_Utils::issue( 'database', 'critical', 'Autoloaded options are oversized', 'WordPress is loading approximately ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . ' of option data into memory.', size_format( $opt['autoload_bytes'] ), 'Review the largest options, map them to their owning plugins, and disable autoload only when the option is not needed on most requests.' );
+            PFC_Utils::issue( 'database', 'critical', 'Autoloaded options are oversized', 'WordPress is loading approximately ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . ' of option data into memory.', size_format( $opt['autoload_bytes'] ), 'Review the largest options, map them to their owning plugins, and disable autoload only when the option is not needed on most requests.' );
         } elseif ( $opt['autoload_bytes'] > 800 * KB_IN_BYTES ) {
-            WPI_Utils::issue( 'database', 'warning', 'Autoloaded options are elevated', 'Autoloaded option data is ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . '.', size_format( $opt['autoload_bytes'] ), 'Review the largest autoloaded options and remove stale plugin data.' );
+            PFC_Utils::issue( 'database', 'warning', 'Autoloaded options are elevated', 'Autoloaded option data is ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . '.', size_format( $opt['autoload_bytes'] ), 'Review the largest autoloaded options and remove stale plugin data.' );
         }
         $observed_days = ! empty( $opt['usage_started_at'] ) ? ( time() - (int) $opt['usage_started_at'] ) / DAY_IN_SECONDS : 0;
-        if ( WPI_Utils::autoload_review_ready( (array) ( $opt['usage_coverage'] ?? array() ), $observed_days ) ) {
+        if ( PFC_Utils::autoload_review_ready( (array) ( $opt['usage_coverage'] ?? array() ), $observed_days ) ) {
             foreach ( array_slice( $opt['largest_autoload'], 0, 30 ) as $row ) {
                 if ( (int) $row['bytes'] < 128 * KB_IN_BYTES || ! empty( $row['last_seen'] ) ) { continue; }
-                WPI_Utils::issue( 'database', 'warning', 'Large autoloaded option has not been observed in sampled requests', '<code>' . esc_html( $row['option_name'] ) . '</code> is ' . esc_html( size_format( (int) $row['bytes'] ) ) . ' and has not been observed through get_option() during approximately ' . intval( $observed_days ) . ' days of sampling.', size_format( (int) $row['bytes'] ), 'Verify the option is not read indirectly or required during unsampled/rare workflows. If confirmed, switch it to non-autoloaded and compare memory/request time before and after.' );
+                PFC_Utils::issue( 'database', 'warning', 'Large autoloaded option has not been observed in sampled requests', '<code>' . esc_html( $row['option_name'] ) . '</code> is ' . esc_html( size_format( (int) $row['bytes'] ) ) . ' and has not been observed through get_option() during approximately ' . intval( $observed_days ) . ' days of sampling.', size_format( (int) $row['bytes'] ), 'Verify the option is not read indirectly or required during unsampled/rare workflows. If confirmed, switch it to non-autoloaded and compare memory/request time before and after.' );
             }
         }
         foreach ( $opt['largest_autoload'] as $row ) {
             if ( 'rewrite_rules' === $row['option_name'] && (int) $row['bytes'] > MB_IN_BYTES ) {
-                WPI_Utils::issue( 'database', 'high', 'Rewrite rules option is extremely large', '<code>rewrite_rules</code> is approximately ' . esc_html( size_format( (int) $row['bytes'] ) ) . '.', size_format( (int) $row['bytes'] ), 'Audit plugins/post types/taxonomies creating rewrite rules and remove stale rules. Flush rewrite rules once after the cause is fixed, not on every request.' );
+                PFC_Utils::issue( 'database', 'high', 'Rewrite rules option is extremely large', '<code>rewrite_rules</code> is approximately ' . esc_html( size_format( (int) $row['bytes'] ) ) . '.', size_format( (int) $row['bytes'] ), 'Audit plugins/post types/taxonomies creating rewrite rules and remove stale rules. Flush rewrite rules once after the cause is fixed, not on every request.' );
             }
         }
 
         if ( null !== $opt['expired_transients'] && $opt['expired_transients'] > 5000 ) {
-            WPI_Utils::issue( 'database', 'warning', 'Large number of expired transients', number_format_i18n( $opt['expired_transients'] ) . ' expired transient timeout rows were found.', number_format_i18n( $opt['expired_transients'] ), 'Delete expired transients in bounded batches and identify plugins that continuously create short-lived transients.' );
+            PFC_Utils::issue( 'database', 'warning', 'Large number of expired transients', number_format_i18n( $opt['expired_transients'] ) . ' expired transient timeout rows were found.', number_format_i18n( $opt['expired_transients'] ), 'Delete expired transients in bounded batches and identify plugins that continuously create short-lived transients.' );
         }
         foreach ( (array) ( $health['orphans']['counts'] ?? array() ) as $type => $count ) {
             if ( $count > 10000 ) {
-                WPI_Utils::issue( 'database', 'warning', 'Large orphaned ' . sanitize_key( $type ) . ' set detected', number_format_i18n( $count ) . ' orphaned rows were found.', number_format_i18n( $count ) . ' rows', 'Export/backup the affected rows, identify the source of the orphaning, and clean in bounded batches during a maintenance window.' );
+                PFC_Utils::issue( 'database', 'warning', 'Large orphaned ' . sanitize_key( $type ) . ' set detected', number_format_i18n( $count ) . ' orphaned rows were found.', number_format_i18n( $count ) . ' rows', 'Export/backup the affected rows, identify the source of the orphaning, and clean in bounded batches during a maintenance window.' );
             }
         }
     }

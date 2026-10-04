@@ -1,36 +1,36 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-final class WPI_Scanner {
+final class PFC_Scanner {
     public static function scan( $deep = false, $force_large = false ) {
-        WPI_Utils::begin_issue_collection( 'scan' );
+        PFC_Utils::begin_issue_collection( 'scan' );
 
-        $system = WPI_System_Health::inspect( $deep );
-        $database_health = WPI_Database_Health::inspect( $deep, $force_large );
-        $jobs = WPI_Job_Health::inspect( $deep, $force_large );
-        $cache = WPI_Cache_Health::inspect();
-        $frontend = WPI_Frontend_Health::inspect( $deep );
-        $regression = WPI_Regression::inspect();
+        $system = PFC_System_Health::inspect( $deep );
+        $database_health = PFC_Database_Health::inspect( $deep, $force_large );
+        $jobs = PFC_Job_Health::inspect( $deep, $force_large );
+        $cache = PFC_Cache_Health::inspect();
+        $frontend = PFC_Frontend_Health::inspect( $deep );
+        $regression = PFC_Regression::inspect();
 
-        WPI_System_Health::generate_issues( $system );
-        WPI_Database_Health::generate_issues( $database_health );
-        WPI_Job_Health::generate_issues( $jobs );
-        WPI_Cache_Health::generate_issues( $cache );
-        WPI_Frontend_Health::generate_issues( $frontend );
-        WPI_Regression::generate_issues( $regression );
-        $observed_incidents = WPI_Utils::collected_incidents();
-        WPI_Utils::end_issue_collection();
+        PFC_System_Health::generate_issues( $system );
+        PFC_Database_Health::generate_issues( $database_health );
+        PFC_Job_Health::generate_issues( $jobs );
+        PFC_Cache_Health::generate_issues( $cache );
+        PFC_Frontend_Health::generate_issues( $frontend );
+        PFC_Regression::generate_issues( $regression );
+        $observed_incidents = PFC_Utils::collected_incidents();
+        PFC_Utils::end_issue_collection();
 
         $database = self::database_compat( $database_health );
         $result = array(
-            'scan_version' => WPI_VERSION,
+            'scan_version' => PFC_VERSION,
             // Absence is not a pass: inspectors can skip checks or lack capabilities.
             'observed_incidents' => $observed_incidents,
             'mode' => $deep ? 'deep' : 'production-safe',
-            'generated_at' => WPI_Utils::now_mysql(),
+            'generated_at' => PFC_Utils::now_mysql(),
             'system' => $system,
             'database_health' => $database_health,
-            'database_repairs' => WPI_Database_Repair::plans( $database_health ),
+            'database_repairs' => PFC_Database_Repair::plans( $database_health ),
             'jobs' => $jobs,
             'frontend' => $frontend,
             'regression' => $regression,
@@ -41,12 +41,12 @@ final class WPI_Scanner {
             'cache' => $cache,
             'action_scheduler' => $jobs['action_scheduler'],
             'plugins' => $system['plugins']['plugins'],
-            'bootstrap' => WPI_Bootstrap::status(),
+            'bootstrap' => PFC_Bootstrap::status(),
             'summary' => self::summary(),
         );
 
         // Keep this bounded. It is a convenience cache for the latest admin report, not telemetry storage.
-        update_option( 'wpi_last_scan', array( 'at' => time(), 'result' => $result ), false );
+        update_option( 'pfc_last_scan', array( 'at' => time(), 'result' => $result ), false );
         return $result;
     }
 
@@ -73,27 +73,27 @@ final class WPI_Scanner {
     }
 
     public static function database( $deep = false, $force_large = false ) {
-        $health = WPI_Database_Health::inspect( $deep, $force_large );
+        $health = PFC_Database_Health::inspect( $deep, $force_large );
         return array_merge( self::database_compat( $health ), array( 'health' => $health ) );
     }
 
     public static function server() {
-        $system = WPI_System_Health::inspect( false );
-        $db = WPI_Database_Health::inspect( false, false );
+        $system = PFC_System_Health::inspect( false );
+        $db = PFC_Database_Health::inspect( false, false );
         return array_merge( $system['php'], array( 'db_version' => $db['server']['version'], 'db_variables' => $db['server']['variables'], 'db_status' => $db['server']['status'] ) );
     }
 
     public static function autoload() {
-        $db = WPI_Database_Health::inspect( false, false );
+        $db = PFC_Database_Health::inspect( false, false );
         return array( 'total_bytes' => $db['options']['autoload_bytes'], 'largest' => $db['options']['largest_autoload'] );
     }
 
-    public static function cron() { return WPI_Job_Health::inspect( false, false )['cron']; }
-    public static function cache() { return WPI_Cache_Health::inspect(); }
-    public static function action_scheduler( $deep = false, $force_large = false ) { return WPI_Job_Health::inspect( $deep, $force_large )['action_scheduler']; }
-    public static function plugins() { return WPI_System_Health::plugins()['plugins']; }
+    public static function cron() { return PFC_Job_Health::inspect( false, false )['cron']; }
+    public static function cache() { return PFC_Cache_Health::inspect(); }
+    public static function action_scheduler( $deep = false, $force_large = false ) { return PFC_Job_Health::inspect( $deep, $force_large )['action_scheduler']; }
+    public static function plugins() { return PFC_System_Health::plugins()['plugins']; }
 
     public static function summary() {
-        return WPI_Utils::incident_summary();
+        return PFC_Utils::incident_summary();
     }
 }

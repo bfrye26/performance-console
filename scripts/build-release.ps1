@@ -1,12 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $pluginRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$pluginHeader = Get-Content (Join-Path $pluginRoot 'wp-performance-inspector.php') -Raw
-if ($pluginHeader -notmatch "define\( 'WPI_VERSION', '([0-9.]+)' \)") { throw 'Plugin version not found.' }
+$pluginHeader = Get-Content (Join-Path $pluginRoot 'performance-console.php') -Raw
+if ($pluginHeader -notmatch "define\( 'PFC_VERSION', '([0-9.]+)' \)") { throw 'Plugin version not found.' }
 $releaseVersion = $Matches[1]
 $outputDir = Join-Path $pluginRoot 'dist'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
-$archivePath = Join-Path $outputDir "wp-performance-inspector-$releaseVersion.zip"
-$releaseFiles = @('wp-performance-inspector.php', 'uninstall.php', 'readme.txt', 'README.md', 'IMPROVEMENT-PLAN.md')
+$archivePath = Join-Path $outputDir "performance-console-$releaseVersion.zip"
+$releaseFiles = @('performance-console.php', 'uninstall.php', 'readme.txt', 'README.md', 'IMPROVEMENT-PLAN.md')
 foreach ($runtimeDir in @('assets', 'includes', 'mu-plugin')) {
     $releaseFiles += Get-ChildItem -LiteralPath (Join-Path $pluginRoot $runtimeDir) -File -Recurse | ForEach-Object {
         $_.FullName.Substring($pluginRoot.Length + 1)
@@ -18,7 +18,7 @@ $archiveStream = [System.IO.File]::Open($archivePath, [System.IO.FileMode]::Crea
 $archive = New-Object System.IO.Compression.ZipArchive($archiveStream, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
     foreach ($relativePath in $releaseFiles) {
-        $entryName = 'wp-performance-inspector/' + $relativePath.Replace('\', '/')
+        $entryName = 'performance-console/' + $relativePath.Replace('\', '/')
         [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, (Join-Path $pluginRoot $relativePath), $entryName) | Out-Null
     }
 } finally {

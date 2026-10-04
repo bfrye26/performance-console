@@ -1,10 +1,10 @@
-# WP Performance Inspector 2.2.1
+# Performance Console 2.2.1
 
 ## 2.2.1 responsive and lifecycle fixes
 
 - The admin suite no longer produces a horizontal scrollbar: the full-bleed background keeps its left bleed without extending past the viewport on the right.
-- Uninstall now removes every plugin data store: the seven custom tables, `wpi_*` options and transients, the maintenance cron event, the generated MU bootstrap, and plugin-created backup files/directories.
-- Per-request overhead removed: the MU sampler reads `wpi_secret` only when a signed diagnostic or save-capture request needs it, and `wpi_db_version` is autoloaded for existing sites on upgrade.
+- Uninstall now removes every plugin data store: the seven custom tables, `pfc_*` options and transients, the maintenance cron event, the generated MU bootstrap, and plugin-created backup files/directories.
+- Per-request overhead removed: the MU sampler reads `pfc_secret` only when a signed diagnostic or save-capture request needs it, and `pfc_db_version` is autoloaded for existing sites on upgrade.
 - The MU bootstrap install is atomic (staging file + rename) so an interrupted write can never leave a truncated file in mu-plugins.
 - The REST autoload endpoint now uses the Repair Centre's protected-option list, closing the divergence where `blogname`, `admin_email`, roles and widget options were changeable through REST only.
 
@@ -26,7 +26,7 @@
 
 Run `php tests/run.php` for PHP regression tests. Run `npm ci --ignore-scripts`, `npm run build:rum`, then `npm test` for the pinned vendor artifact and JavaScript transport tests. WordPress does not require Node or npm at runtime. Ship `assets/vendor/web-vitals/`, including its Apache-2.0 license, with the plugin.
 
-After installing this update, open the WPI admin page to refresh its MU bootstrap and purge cached HTML through your existing page-cache/CDN controls so visitors receive the new script dependency. The RUM panel starts with version-2 data only. On Windows, `scripts/build-release.ps1` builds a runtime-only ZIP and refuses to overwrite an existing archive.
+After installing this update, open the Performance Console admin page to refresh its MU bootstrap and purge cached HTML through your existing page-cache/CDN controls so visitors receive the new script dependency. The RUM panel starts with version-2 data only. On Windows, `scripts/build-release.ps1` builds a runtime-only ZIP and refuses to overwrite an existing archive.
 
 See [IMPROVEMENT-PLAN.md](IMPROVEMENT-PLAN.md) for the remaining work toward wider compatibility and guided remediation. This release is the trust-and-measurement foundation, not a universal automatic optimizer.
 
@@ -58,16 +58,16 @@ See [IMPROVEMENT-PLAN.md](IMPROVEMENT-PLAN.md) for the remaining work toward wid
 - Groups repeated route evidence into root-cause incidents with occurrence counts, affected routes, confidence and lifecycle history.
 - Adds one-click recheck, snooze, resolve and accepted-risk actions without discarding evidence.
 - Requires a repeat observation before passive one-off spikes become confirmed incidents and expires stale passive incidents after seven days.
-- Filters database daemons and expected compatibility probes so WPI does not report its own inspection noise as site failures.
+- Filters database daemons and expected compatibility probes so Performance Console does not report its own inspection noise as site failures.
 - Adds cache-safe client-side RUM sampling, single-use route-bound tokens, rate limiting, route-group attribution and histogram-based p75 reporting.
 - Alternates five private plugin A/B pairs after warm-up and rejects comparisons when the response type or size changes materially.
-- Loads heavy diagnostic modules only for WPI admin, REST and CLI work, and renders one admin view per request.
+- Loads heavy diagnostic modules only for Performance Console admin, REST and CLI work, and renders one admin view per request.
 - Adds representative custom-post-type route probes, configurable deep-scan URLs, responsive incident cards and an executable regression test harness.
 - Uses MariaDB-compatible primary-key discovery so resumable backups no longer emit one SQL error per table.
 
 ## 1.10.0 managed index ownership
 
-- Accepts managed-index registrations from active plugins through `wpi_managed_database_indexes`.
+- Accepts managed-index registrations from active plugins through `pfc_managed_database_indexes`.
 - Prefers a plugin's canonical index name when present, otherwise its highest-priority registered legacy alias.
 - Shows plugin ownership and canonical-name state in duplicate-index repair plans.
 - Revalidates ownership and keep/drop direction before executing duplicate-index DDL.
@@ -78,18 +78,18 @@ See [IMPROVEMENT-PLAN.md](IMPROVEMENT-PLAN.md) for the remaining work toward wid
 ## 1.9.2 live PRIMARY KEY dependency repair
 
 - Core-column repairs now inspect the **actual live PRIMARY KEY**, not only WordPress' expected key. This fixes tables where a plugin/migration has placed a normally-nullable core column such as `wp_usermeta.meta_key` inside a custom/composite PRIMARY KEY.
-- If the selected column cannot be corrected while the malformed live key remains, WPI atomically drops the live PRIMARY KEY, applies the exact WordPress column definition, and restores WordPress' expected PRIMARY KEY.
+- If the selected column cannot be corrected while the malformed live key remains, Performance Console atomically drops the live PRIMARY KEY, applies the exact WordPress column definition, and restores WordPress' expected PRIMARY KEY.
 - The SQL shown under **Preview SQL** is generated by the same dependency planner used by the repair action, so the preview reflects the complete ALTER rather than only the selected column fragment.
 - PRIMARY KEY repair remains dependency-aware for missing and mismatched core keys and retains NULL, duplicate and signed-to-unsigned safety preflights.
 - Repair definitions continue to come from the exact schema shipped by the installed WordPress version.
 
 ## 1.8.0 CGM Suite UI
 
-The Performance Inspector admin interface follows the CGM Suite's compact WordPress-admin design language, with a calm diagnostic surface, clear status colours, accessible navigation, incident cards, cleaner tables/forms and responsive layouts. The interface is organized into Overview, Incidents, Database, Profiling, Monitoring and System views. Existing deep links such as Database Backups and the InnoDB Transaction Manager remain functional and automatically activate the Database view.
+The Performance Console admin interface follows the CGM Suite's compact WordPress-admin design language, with a calm diagnostic surface, clear status colours, accessible navigation, incident cards, cleaner tables/forms and responsive layouts. The interface is organized into Overview, Incidents, Database, Profiling, Monitoring and System views. Existing deep links such as Database Backups and the InnoDB Transaction Manager remain functional and automatically activate the Database view.
 
 ## 1.7.0 InnoDB transaction remediation
 
-The Repair Centre now includes a live **InnoDB Transaction Manager**. When a schema/index/table repair is blocked by an open InnoDB transaction, WPI shows the owning MySQL thread, transaction age/state, connection user/host/database, rows locked/modified, normalized SQL, and blocker/waiter relationships. Eligible stuck or abandoned connections can be terminated from wp-admin with explicit acknowledgement that their uncommitted work will be rolled back. Very old or large transactions require a second high-risk acknowledgement because rollback itself can be expensive. WPI never terminates its own connection, recognized server/system/replication sessions, or transactions already rolling back.
+The Repair Centre now includes a live **InnoDB Transaction Manager**. When a schema/index/table repair is blocked by an open InnoDB transaction, Performance Console shows the owning MySQL thread, transaction age/state, connection user/host/database, rows locked/modified, normalized SQL, and blocker/waiter relationships. Eligible stuck or abandoned connections can be terminated from wp-admin with explicit acknowledgement that their uncommitted work will be rolled back. Very old or large transactions require a second high-risk acknowledgement because rollback itself can be expensive. Performance Console never terminates its own connection, recognized server/system/replication sessions, or transactions already rolling back.
 
 CLI equivalents are `wp performance innodb-transactions` and `wp performance innodb-terminate <thread-id> --rollback-confirmed`.
 
@@ -100,7 +100,7 @@ Browser database backups now use adaptive high-throughput export steps. Instead 
 
 The exporter remains resumable and intentionally yields before ordinary proxy/FastCGI request limits. WP-CLI remains the preferred option for extremely large databases, but it uses the same faster state machine.
 
-WP Performance Inspector is a production-oriented WordPress diagnostic and remediation suite. It is designed to identify *why* WordPress is slow or unstable, attribute expensive work to the responsible component, detect database and plugin faults, and offer bounded fixes where they can be applied safely.
+Performance Console is a production-oriented WordPress diagnostic and remediation suite. It is designed to identify *why* WordPress is slow or unstable, attribute expensive work to the responsible component, detect database and plugin faults, and offer bounded fixes where they can be applied safely.
 
 ## Major diagnostics
 
@@ -160,11 +160,11 @@ WP Performance Inspector is a production-oriented WordPress diagnostic and remed
 
 ## Database backups and guided maintenance
 
-Version 1.6 adds a Database Backups area directly above the Repair Centre. WPI can create a private logical export of all WordPress-prefixed tables or the entire current database. Browser exports are resumable and write rows in bounded batches; tables with a single numeric primary key use cursor pagination instead of ever-growing `OFFSET` queries.
+Version 1.6 adds a Database Backups area directly above the Repair Centre. Performance Console can create a private logical export of all WordPress-prefixed tables or the entire current database. Browser exports are resumable and write rows in bounded batches; tables with a single numeric primary key use cursor pagination instead of ever-growing `OFFSET` queries.
 
-Completed backups are verified with a completion marker and SHA-256 checksum. Downloads require an authenticated administrator request. WPI prefers a writable location outside the detected web root and falls back to a randomized private directory protected by deny rules when necessary. These exports contain table schema and row data only; they do not include database users/grants, server configuration, routines, triggers/events or a host/filesystem snapshot.
+Completed backups are verified with a completion marker and SHA-256 checksum. Downloads require an authenticated administrator request. Performance Console prefers a writable location outside the detected web root and falls back to a randomized private directory protected by deny rules when necessary. These exports contain table schema and row data only; they do not include database users/grants, server configuration, routines, triggers/events or a host/filesystem snapshot.
 
-A recent verified WPI backup can be selected directly from any repair that requires a backup. Administrators can alternatively confirm an independently verified external backup or storage snapshot. Previously CLI-only `cli-review` findings now expose a guarded **Run Maintenance Fix** workflow in wp-admin. This requires maintenance-window acknowledgement plus the same backup, danger/data-loss, table-size, online-DDL, lock and disk-space gates used by the repair engine. WP-CLI remains the preferred route for the largest tables because a browser request can still be interrupted by PHP/FastCGI/proxy time limits.
+A recent verified Performance Console backup can be selected directly from any repair that requires a backup. Administrators can alternatively confirm an independently verified external backup or storage snapshot. Previously CLI-only `cli-review` findings now expose a guarded **Run Maintenance Fix** workflow in wp-admin. This requires maintenance-window acknowledgement plus the same backup, danger/data-loss, table-size, online-DDL, lock and disk-space gates used by the repair engine. WP-CLI remains the preferred route for the largest tables because a browser request can still be interrupted by PHP/FastCGI/proxy time limits.
 
 WP-CLI backup commands:
 
@@ -185,7 +185,7 @@ Version 1.4 includes an explicit storage-engine capability and guided InnoDB rec
 - **CSV:** integrity checks are supported, but automatic repair is intentionally blocked because a CSV repair may discard rows after the first damaged record.
 - **MEMORY/HEAP:** metadata/size/schema inspection only; no fake durability/repair actions are offered.
 - **NDB/NDBCLUSTER:** metadata and recognized ANALYZE support, while recovery/topology work is left to cluster tooling.
-- **Unknown/plugin engines (including RocksDB/MyRocks variants):** diagnostic metadata is retained, but WPI does not guess at repair commands it cannot verify.
+- **Unknown/plugin engines (including RocksDB/MyRocks variants):** diagnostic metadata is retained, but Performance Console does not guess at repair commands it cannot verify.
 
 Deep integrity scans use an engine-supported `CHECK TABLE` path on size-safe tables and record the engine alongside every result. `EXTENDED` checks are never run automatically.
 
@@ -205,7 +205,7 @@ Deep integrity scans use an engine-supported `CHECK TABLE` path on size-safe tab
 - automatically runs post-repair `CHECK TABLE` and `ANALYZE TABLE`, and verifies rebuilt indexes exist
 - generates conservative review-only index candidates for simple single-table slow queries; candidates are never created automatically
 
-Emergency `innodb_force_recovery` is diagnostic-only. WPI never enables it and never describes it as a repair mechanism; use it only as part of controlled data extraction/recovery.
+Emergency `innodb_force_recovery` is diagnostic-only. Performance Console never enables it and never describes it as a repair mechanism; use it only as part of controlled data extraction/recovery.
 
 ## Database Repair Centre
 
