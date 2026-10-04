@@ -1,4 +1,8 @@
-# Performance Console 2.2.1
+# Performance Console 3.0.0
+
+## 3.0.0 rename and migration
+
+Performance Console is the new name of WP Performance Inspector. WordPress.org has never hosted the plugin, so the rename also changes the text domain and code prefixes from `wpi_`/`WPI_` to `pfc_`/`PFC_`. Existing installs upgrade in place: on activation the plugin renames its seven tables, options, transients, maintenance cron event and MU bootstrap from `wpi_*` to `pfc_*` without deleting diagnostic history or backups.
 
 ## 2.2.1 responsive and lifecycle fixes
 

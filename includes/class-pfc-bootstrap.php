@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class PFC_Bootstrap {
-    const VERSION = '1.3.2';
+    const VERSION = '2.0.0';
     const SAVE_COOKIE = 'pfc_capture_save';
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-performance-console-bootstrap.php'; }

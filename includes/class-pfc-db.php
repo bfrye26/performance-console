@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class PFC_DB {
-    const DB_VERSION = '2.2.1';
+    const DB_VERSION = '3.0.0';
     const LEGACY_TABLE_SUFFIXES = array( 'runs', 'queries', 'issues', 'metrics', 'changes', 'option_usage', 'backups' );
     const LEGACY_OPTION_PATTERNS = array( 'wpi\_%', '\_transient\_wpi\_%', '\_transient\_timeout\_wpi\_%' );
     const LEGACY_CRON_HOOK = 'wpi_daily_maintenance';

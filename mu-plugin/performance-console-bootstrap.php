@@ -1,6 +1,6 @@
 <?php
 /** Performance Console early diagnostic/bootstrap sampler.
- * PFC Bootstrap Version: 1.3.2
+ * PFC Bootstrap Version: 2.0.0
  */
 if ( ! defined( 'ABSPATH' ) ) { return; }
 
