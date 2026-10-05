@@ -1,6 +1,6 @@
 <?php
 /** Performance Console early diagnostic/bootstrap sampler.
- * PFC Bootstrap Version: 2.0.0
+ * PFC Bootstrap Version: 2.1.0
  */
 if ( ! defined( 'ABSPATH' ) ) { return; }
 
@@ -37,7 +37,7 @@ if ( ! $pfc_deep && ! empty( $_COOKIE['pfc_capture_save'] ) ) {
         list( $pfc_user_id, $pfc_expires, $pfc_capture_kind, $pfc_capture_id, $pfc_cookie_sig ) = $pfc_cookie;
         $pfc_cookie_data = $pfc_user_id . '|' . $pfc_expires . '|' . $pfc_capture_kind . '|' . $pfc_capture_id;
         $pfc_valid_cookie = ctype_digit( $pfc_user_id ) && ctype_digit( $pfc_expires )
-            && in_array( $pfc_capture_kind, array( 'manual', 'autosave' ), true )
+            && in_array( $pfc_capture_kind, array( 'manual', 'autosave', 'metabox' ), true )
             && 1 === preg_match( '/^[a-f0-9-]{36}$/i', $pfc_capture_id )
             && 1 === preg_match( '/^[a-f0-9]{64}$/i', $pfc_cookie_sig )
             && (int) $pfc_expires >= time() && (int) $pfc_expires <= time() + 15 * MINUTE_IN_SECONDS
@@ -49,9 +49,9 @@ if ( ! $pfc_deep && ! empty( $_COOKIE['pfc_capture_save'] ) ) {
         $pfc_utils_file = dirname( WP_PLUGIN_DIR . '/' . $pfc_basename ) . '/includes/class-pfc-utils.php';
         if ( $pfc_valid_cookie && is_readable( $pfc_utils_file ) ) {
             require_once $pfc_utils_file;
-            $pfc_context = PFC_Utils::save_request_context( $pfc_method, $pfc_uri, wp_unslash( $_REQUEST ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $pfc_context = PFC_Utils::save_request_context( $pfc_method, $pfc_uri, wp_unslash( $_REQUEST ), wp_unslash( $_POST ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         }
-        $pfc_kind_matches = $pfc_context && ( ( 'autosave' === $pfc_capture_kind ) === ! empty( $pfc_context['autosave'] ) );
+        $pfc_kind_matches = $pfc_context && class_exists( 'PFC_Utils' ) && PFC_Utils::save_context_matches_capture( $pfc_context, $pfc_capture_kind );
         if ( $pfc_kind_matches ) {
             $pfc_save_capture = $pfc_context + array( 'capture_id' => $pfc_capture_id, 'user_id' => (int) $pfc_user_id, 'requested_kind' => $pfc_capture_kind );
             $pfc_probe_id = $pfc_capture_id;

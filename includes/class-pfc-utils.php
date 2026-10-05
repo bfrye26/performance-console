@@ -13,6 +13,47 @@ final class PFC_Utils {
 
     public static function now_mysql() { return current_time( 'mysql', true ); }
 
+    /**
+     * Multibyte-safe truncation that degrades to the byte-safe core function.
+     *
+     * mbstring is optional in PHP and is not installed on every host, while SQL
+     * text, file paths and error strings are overwhelmingly ASCII. Calling
+     * mb_substr() unconditionally turned an optional extension into a fatal
+     * error on those hosts, so every truncation goes through here.
+     *
+     * The middle $start argument is accepted because the call sites were ported
+     * from mb_substr( $value, 0, $length ). Passing it is a no-op for a start of
+     * 0, and an explicit non-zero start is honoured, so a lingering
+     * mb_substr-shaped call can never silently truncate to zero bytes.
+     */
+    public static function truncate( $value, $start = 0, $length = null ) {
+        $value = (string) $value;
+        if ( null === $length ) { $length = $start; $start = 0; }
+        $start = max( 0, (int) $start );
+        $length = max( 0, (int) $length );
+        if ( function_exists( 'mb_substr' ) ) { return mb_substr( $value, $start, $length ); }
+        return substr( $value, $start, $length );
+    }
+
+    /**
+     * Remove control characters before text is printed to a terminal or a log.
+     *
+     * SQL text echoed from other MySQL sessions can contain escape sequences, and
+     * WP-CLI prints it raw, so an operator's console is the injection target.
+     */
+    public static function strip_control_chars( $value ) {
+        return (string) preg_replace( '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', (string) $value );
+    }
+
+    /**
+     * Byte-scale constants that do not depend on WordPress having loaded them.
+     * WordPress defines MB_IN_BYTES/GB_IN_BYTES in wp-includes/compat.php, but the
+     * schema, backup and health code also runs from WP-CLI and MU-plugin contexts
+     * where relying on that is unnecessary coupling.
+     */
+    const MB_IN_BYTES = 1048576;
+    const GB_IN_BYTES = 1073741824;
+
     public static function normalize_sql( $sql ) {
         $sql = (string) $sql;
         $sql = preg_replace( "/'(?:''|\\\\.|[^'])*'/s", '?', $sql );
@@ -20,7 +61,7 @@ final class PFC_Utils {
         $sql = preg_replace( '/\b0x[0-9a-f]+\b/i', '?', $sql );
         $sql = preg_replace( '/\b\d+(?:\.\d+)?\b/', '?', $sql );
         $sql = preg_replace( '/\s+/', ' ', trim( $sql ) );
-        return mb_substr( $sql, 0, 12000 );
+        return self::truncate( $sql, 12000 );
     }
 
     public static function component_from_trace( array $trace ) {
@@ -99,45 +140,134 @@ final class PFC_Utils {
 
     public static function end_issue_collection() { self::$issue_source = 'passive'; self::$issue_run_id = 0; }
 
+    /** Resolved once per request: the atomic issue upsert depends on this key. */
+    private static $issue_key_is_unique = null;
+
+    /**
+     * Drop the cached unique-key decision.
+     *
+     * Only needed by the regression suite, which must be able to exercise the
+     * non-atomic fallback inside a single PHP process.
+     */
+    public static function reset_issue_key_cache() { self::$issue_key_is_unique = null; }
+
+    /**
+     * Confirm the issues table still carries the UNIQUE key on issue_key.
+     *
+     * The atomic upsert below relies on ON DUPLICATE KEY UPDATE firing. If a site
+     * somehow lost that key, every write would insert a new row and occurrence
+     * counts would silently stop accumulating, so the write path falls back to the
+     * unambiguous read-then-write when the key is absent.
+     */
+    private static function issue_key_is_unique() {
+        global $wpdb;
+        if ( null !== self::$issue_key_is_unique ) { return self::$issue_key_is_unique; }
+        self::$issue_key_is_unique = false;
+        $indexes = $wpdb->get_results( 'SHOW INDEX FROM ' . self::table( 'issues' ) . " WHERE Key_name = 'issue_key'", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        foreach ( (array) $indexes as $index ) {
+            if ( 0 === (int) ( $index['Non_unique'] ?? 1 ) ) { self::$issue_key_is_unique = true; break; }
+        }
+        return self::$issue_key_is_unique;
+    }
+
+    /**
+     * Decide the stored status for a repeated finding.
+     *
+     * A re-observation must not silently undo an operator decision: accepted risk
+     * and unexpired snoozes are preserved, an expired snooze lapses back to the
+     * observing state, and passive single observations stay "observing" until a
+     * second sighting confirms them.
+     */
+    public static function next_issue_status( $existing_status, $source, $snooze_expired_until = null, $now = null ) {
+        $now = null === $now ? time() : (int) $now;
+        $existing_status = (string) $existing_status;
+        if ( 'accepted' === $existing_status ) { return 'accepted'; }
+        if ( 'snoozed' === $existing_status ) {
+            $until = $snooze_expired_until ? strtotime( (string) $snooze_expired_until . ' UTC' ) : false;
+            if ( $until && $until > $now ) { return 'snoozed'; }
+        }
+        return 'passive' === $source ? 'observing' : 'open';
+    }
+
+    /**
+     * Record or refresh one finding.
+     *
+     * This runs once per finding per scan, so it is the hottest write in the
+     * plugin. A single INSERT ... ON DUPLICATE KEY UPDATE replaces the previous
+     * SELECT-then-INSERT/UPDATE pair, which halved the statement count and removed
+     * the race in which two concurrent requests both decide a finding is new.
+     */
     public static function issue( $area, $severity, $title, $message, $impact = '', $recommendation = '', $route = '', array $context = array() ) {
         global $wpdb;
         $table = self::table( 'issues' );
         $key = md5( implode( '|', array( $area, $title, $route ) ) );
         $incident_key = self::incident_key( $area, $title, $message, $context );
         self::$collected_incidents[ $incident_key ] = true;
+        $source = self::$issue_source;
         $now = self::now_mysql();
-        $data = array(
-            'issue_key'       => $key,
-            'area'            => sanitize_key( $area ),
-            'severity'        => sanitize_key( $severity ),
-            'title'           => sanitize_text_field( $title ),
-            'message'         => wp_kses_post( $message ),
-            'impact'          => sanitize_text_field( $impact ),
-            'recommendation'  => wp_kses_post( $recommendation ),
-            'route'           => sanitize_text_field( $route ),
-            'incident_key'    => $incident_key,
-            'component'       => sanitize_text_field( (string) ( $context['component'] ?? self::component_from_issue( $title, $message ) ) ),
-            'source'          => self::$issue_source,
-            'confidence'      => max( 0, min( 100, (float) ( $context['confidence'] ?? ( 'scan' === self::$issue_source ? 80 : 60 ) ) ) ),
-            'last_run_id'     => absint( $context['run_id'] ?? self::$issue_run_id ),
-            'status'          => 'open',
-            'snoozed_until'   => null,
-            'resolved_at'     => null,
-            'last_seen'       => $now,
-        );
+        $area = sanitize_key( $area );
+        $severity = sanitize_key( $severity );
+        $title = sanitize_text_field( $title );
+        $message = wp_kses_post( $message );
+        $impact = sanitize_text_field( $impact );
+        $recommendation = wp_kses_post( $recommendation );
+        $route = sanitize_text_field( $route );
+        $component = sanitize_text_field( (string) ( $context['component'] ?? self::component_from_issue( $title, $message ) ) );
+        $confidence = max( 0, min( 100, (float) ( $context['confidence'] ?? ( 'scan' === $source ? 80 : 60 ) ) ) );
+        $run_id = absint( $context['run_id'] ?? self::$issue_run_id );
+
+        if ( self::issue_key_is_unique() ) {
+            // A first sighting follows the observing/open rule; a repeat is resolved
+            // by the CASE below, which preserves accepted risk and live snoozes.
+            $new_status = self::next_issue_status( '', $source );
+            $sql = "INSERT INTO {$table} (issue_key,area,severity,title,message,impact,recommendation,route,incident_key,component,source,occurrence_count,confidence,last_run_id,status,snoozed_until,resolved_at,first_seen,last_seen)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%f,%d,%s,NULL,NULL,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    area=VALUES(area),severity=VALUES(severity),title=VALUES(title),message=VALUES(message),
+                    impact=VALUES(impact),recommendation=VALUES(recommendation),route=VALUES(route),
+                    incident_key=VALUES(incident_key),component=VALUES(component),source=VALUES(source),
+                    confidence=VALUES(confidence),last_run_id=VALUES(last_run_id),
+                    occurrence_count=occurrence_count+1,
+                    status=IF(status='accepted','accepted',IF(status='snoozed' AND snoozed_until IS NOT NULL AND snoozed_until>UTC_TIMESTAMP(),'snoozed',%s)),
+                    resolved_at=IF(status='accepted' OR (status='snoozed' AND snoozed_until IS NOT NULL AND snoozed_until>UTC_TIMESTAMP()),resolved_at,NULL),
+                    last_seen=VALUES(last_seen)";
+            // Argument order is positional and load-bearing. The CASE expressions
+            // reference the source invariant rather than VALUES(status), because
+            // MySQL evaluates ON DUPLICATE KEY UPDATE assignments left to right.
+            $prepared = $wpdb->prepare( $sql, $key, $area, $severity, $title, $message, $impact, $recommendation, $route, $incident_key, $component, $source, $confidence, $run_id, $new_status, $new_status, $now, $now ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            if ( false !== $wpdb->query( $prepared ) ) { return; }
+            // The upsert is unavailable (unexpected schema or server rejection);
+            // fall through to the explicit path so a finding is never dropped.
+        }
+
         $exists = $wpdb->get_row( $wpdb->prepare( "SELECT id,occurrence_count,status,snoozed_until FROM {$table} WHERE issue_key=%s", $key ), ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $status = null === $exists ? self::next_issue_status( '', $source ) : self::next_issue_status( $exists['status'] ?? '', $source, $exists['snoozed_until'] ?? null );
+        $data = array(
+            'issue_key'      => $key,
+            'area'           => $area,
+            'severity'       => $severity,
+            'title'          => $title,
+            'message'        => $message,
+            'impact'         => $impact,
+            'recommendation' => $recommendation,
+            'route'          => $route,
+            'incident_key'   => $incident_key,
+            'component'      => $component,
+            'source'         => $source,
+            'confidence'     => $confidence,
+            'last_run_id'    => $run_id,
+            'status'         => $status,
+            'snoozed_until'  => 'snoozed' === $status ? ( $exists['snoozed_until'] ?? null ) : null,
+            'last_seen'      => $now,
+        );
         if ( $exists ) {
             $data['occurrence_count'] = max( 1, (int) ( $exists['occurrence_count'] ?? 0 ) + 1 );
-            if ( 'accepted' === (string) $exists['status'] ) { $data['status'] = 'accepted'; }
-            if ( 'snoozed' === (string) $exists['status'] && ! empty( $exists['snoozed_until'] ) && strtotime( $exists['snoozed_until'] . ' UTC' ) > time() ) {
-                $data['status'] = 'snoozed';
-                $data['snoozed_until'] = $exists['snoozed_until'];
-            }
+            if ( ! in_array( $status, array( 'accepted', 'snoozed' ), true ) ) { $data['resolved_at'] = null; }
             $wpdb->update( $table, $data, array( 'id' => (int) $exists['id'] ) );
         } else {
             $data['first_seen'] = $now;
             $data['occurrence_count'] = 1;
-            if ( 'passive' === self::$issue_source ) { $data['status'] = 'observing'; }
+            $data['resolved_at'] = null;
             $wpdb->insert( $table, $data );
         }
     }
@@ -236,14 +366,30 @@ final class PFC_Utils {
         return null;
     }
 
+    /**
+     * Estimate a percentile from a bucketed histogram.
+     *
+     * The stored buckets are coarse (100/200/500/1000/2500/4000/10000 ms), so the
+     * result is the ceiling of the bucket the percentile falls into rather than an
+     * interpolated value. For the final bucket the ceiling is meaningless -- it is
+     * the clamp applied on ingest, so every sample above 10 s reports 600000 ms --
+     * so the observed maximum is used instead when value_max is available.
+     */
     public static function metric_percentile( array $row, $percentile = 0.75 ) {
         $total = max( 0, (int) ( $row['samples'] ?? 0 ) );
         if ( ! $total ) { return 0; }
+        $value_max = (float) ( $row['value_max'] ?? 0 );
         $target = max( 1, (int) ceil( $total * max( 0, min( 1, (float) $percentile ) ) ) );
         $limits = 'cls' === (string) ( $row['metric'] ?? '' ) ? array( 0.05, 0.1, 0.15, 0.25, 0.5, 1, 2, 10 ) : array( 100, 200, 500, 1000, 2500, 4000, 10000, 600000 );
+        $last = count( $limits ) - 1;
         $seen = 0;
-        foreach ( $limits as $index => $limit ) { $seen += (int) ( $row[ 'bucket_' . $index ] ?? 0 ); if ( $seen >= $target ) { return $limit; } }
-        return (float) ( $row['value_max'] ?? 0 );
+        foreach ( $limits as $index => $limit ) {
+            $seen += (int) ( $row[ 'bucket_' . $index ] ?? 0 );
+            if ( $seen < $target ) { continue; }
+            if ( $index === $last && $value_max > 0 ) { return $value_max; }
+            return $limit;
+        }
+        return $value_max;
     }
 
     public static function route() {
@@ -313,7 +459,7 @@ final class PFC_Utils {
         );
     }
 
-    public static function save_request_context( $method = '', $uri = '', array $request = array() ) {
+    public static function save_request_context( $method = '', $uri = '', array $request = array(), array $post = array() ) {
         $method = strtoupper( (string) ( $method ?: ( $_SERVER['REQUEST_METHOD'] ?? 'GET' ) ) );
         if ( ! in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) { return false; }
         $uri = (string) ( $uri ?: ( $_SERVER['REQUEST_URI'] ?? '' ) );
@@ -322,6 +468,17 @@ final class PFC_Utils {
         $action = sanitize_key( (string) ( $request['action'] ?? '' ) );
         $post_id = absint( $request['post_ID'] ?? ( $request['post_id'] ?? 0 ) );
         $post_type = sanitize_key( (string) ( $request['post_type'] ?? '' ) );
+
+        if ( 'POST' === $method && preg_match( '#/wp-admin/post\.php$#i', $path ) ) {
+            $query = array();
+            parse_str( (string) wp_parse_url( $uri, PHP_URL_QUERY ), $query );
+            $body_action = sanitize_key( (string) ( $post['action'] ?? '' ) );
+            $body_post_id = absint( $post['post_ID'] ?? 0 );
+            $query_post_id = absint( $query['post'] ?? 0 );
+            if ( '1' === (string) ( $query['meta-box-loader'] ?? '' ) && 'edit' === (string) ( $query['action'] ?? '' ) && 'editpost' === $body_action && $body_post_id > 0 && $body_post_id === $query_post_id ) {
+                return array( 'kind' => 'classic-metabox-save', 'autosave' => false, 'post_id' => $body_post_id, 'post_type' => sanitize_key( (string) ( $post['post_type'] ?? '' ) ), 'method' => $method );
+            }
+        }
 
         if ( preg_match( '#/wp-admin/post\.php$#i', $path ) && in_array( $action, array( 'editpost', 'post' ), true ) ) {
             return array( 'kind' => 'classic-editor', 'autosave' => false, 'post_id' => $post_id, 'post_type' => $post_type, 'method' => $method );
@@ -353,7 +510,8 @@ final class PFC_Utils {
     }
 
     public static function save_context_matches_capture( $context, $capture_kind ) {
-        if ( ! is_array( $context ) || ! in_array( $capture_kind, array( 'manual', 'autosave' ), true ) ) { return false; }
+        if ( ! is_array( $context ) || ! in_array( $capture_kind, array( 'manual', 'autosave', 'metabox' ), true ) ) { return false; }
+        if ( 'metabox' === $capture_kind ) { return 'classic-metabox-save' === ( $context['kind'] ?? '' ); }
         return 'autosave' === $capture_kind ? ! empty( $context['autosave'] ) : empty( $context['autosave'] );
     }
 

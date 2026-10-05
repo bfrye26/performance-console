@@ -66,11 +66,20 @@ final class PFC_Frontend_Health {
         $urls = array();
         foreach ( array(
             '/<script\b[^>]*\bsrc=["\']([^"\']+)["\']/i',
-            '/<link\b[^>]*\bhref=["\']([^"\']+)["\'][^>]*(?:rel=["\']stylesheet["\']|as=["\']style["\'])/i',
             '/<img\b[^>]*\bsrc=["\']([^"\']+)["\']/i',
             '/<iframe\b[^>]*\bsrc=["\']([^"\']+)["\']/i',
         ) as $pattern ) {
             if ( preg_match_all( $pattern, $html, $matches ) ) { foreach ( $matches[1] as $u ) { $urls[] = html_entity_decode( $u, ENT_QUOTES, 'UTF-8' ); } }
+        }
+        // <link> attributes are emitted in any order: WordPress core prints
+        // rel before href, so requiring href first silently dropped every core
+        // stylesheet from the asset inventory while the separate stylesheet
+        // counter (which used a look-ahead) still counted them.
+        if ( preg_match_all( '/<link\b[^>]*>/i', $html, $link_tags ) ) {
+            foreach ( $link_tags[0] as $tag ) {
+                if ( ! self::is_stylesheet_link( $tag ) ) { continue; }
+                if ( preg_match( '/\bhref\s*=\s*["\']([^"\']+)["\']/i', $tag, $href ) ) { $urls[] = html_entity_decode( $href[1], ENT_QUOTES, 'UTF-8' ); }
+            }
         }
         $hosts = array(); $components = array(); $third_party = 0; $home_host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
         $duplicates = array_count_values( $urls );
@@ -91,8 +100,11 @@ final class PFC_Frontend_Health {
         if ( preg_match_all( '/<img\b[^>]*>/i', $html, $images ) ) {
             $signals['images'] = count( $images[0] );
             foreach ( $images[0] as $tag ) {
-                if ( ! preg_match( '/\bwidth\s*=\s*["\'][^"\']+["\']/i', $tag ) || ! preg_match( '/\bheight\s*=\s*["\'][^"\']+["\']/i', $tag ) ) { $signals['images_missing_dimensions']++; }
-                if ( preg_match( '/\bloading\s*=\s*["\']lazy["\']/i', $tag ) ) { $signals['images_lazy']++; }
+                // Attribute values may be quoted or bare (minifiers strip quotes),
+                // so requiring quotes reported correctly sized images as missing
+                // width/height.
+                if ( ! self::has_attribute( $tag, 'width' ) || ! self::has_attribute( $tag, 'height' ) ) { $signals['images_missing_dimensions']++; }
+                if ( self::has_attribute( $tag, 'loading', 'lazy' ) ) { $signals['images_lazy']++; }
             }
         }
         $head = '';
@@ -102,8 +114,39 @@ final class PFC_Frontend_Health {
                 if ( ! preg_match( '/\b(?:async|defer)(?:\s|=|>)/i', $tag ) && ! preg_match( '/\btype\s*=\s*["\']module["\']/i', $tag ) ) { $signals['head_blocking_scripts']++; }
             }
         }
-        if ( preg_match_all( '/<link\b(?=[^>]*\brel=["\']stylesheet["\'])[^>]*>/i', $html, $styles ) ) { $signals['stylesheets'] = count( $styles[0] ); }
+        if ( preg_match_all( '/<link\b[^>]*>/i', $html, $styles ) ) {
+            foreach ( $styles[0] as $tag ) { if ( self::is_stylesheet_link( $tag ) ) { $signals['stylesheets']++; } }
+        }
         return $signals;
+    }
+
+    /**
+     * True when a tag represents a stylesheet, regardless of attribute order.
+     *
+     * A plain rel="stylesheet" always counts. rel="preload" only counts when it
+     * declares as="style" -- a font or script preload is not a stylesheet, and
+     * counting it inflated the asset inventory and mis-attributed the font host.
+     */
+    private static function is_stylesheet_link( $tag ) {
+        $tag = (string) $tag;
+        if ( 1 !== preg_match( '/\bhref\s*=\s*["\'][^"\']+["\']/i', $tag ) ) { return false; }
+        if ( 1 === preg_match( '/\brel\s*=\s*["\']?[^"\'\s>]*\bstylesheet\b/i', $tag ) ) { return true; }
+        return 1 === preg_match( '/\brel\s*=\s*["\']?preload\b/i', $tag )
+            && 1 === preg_match( '/\bas\s*=\s*["\']?style\b/i', $tag );
+    }
+
+    /**
+     * True when a tag declares an attribute, optionally with an exact value.
+     * Accepts href="x", href='x' and href=x, and an empty value when no value
+     * is required, so bare minified attributes are not treated as absent.
+     */
+    private static function has_attribute( $tag, $name, $value = null ) {
+        $tag = (string) $tag;
+        $name = preg_quote( (string) $name, '/' );
+        if ( null === $value ) {
+            return 1 === preg_match( '/\b' . $name . '\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', $tag );
+        }
+        return 1 === preg_match( '/\b' . $name . '\s*=\s*(?:"' . preg_quote( (string) $value, '/' ) . '"|\'' . preg_quote( (string) $value, '/' ) . '\'|' . preg_quote( (string) $value, '/' ) . ')(?=[\s>]|$)/i', $tag );
     }
 
     private static function component_from_url( $url ) {

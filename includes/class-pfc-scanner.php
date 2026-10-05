@@ -50,6 +50,21 @@ final class PFC_Scanner {
         return $result;
     }
 
+    /**
+     * Read the cached report, discarding one written by a different plugin version.
+     *
+     * The cached report is a plain option that survives upgrades, and its shape
+     * changes between releases (keys are added and removed). Rendering a stale
+     * shape is what produced undefined-key warnings on the System view, so an
+     * older report is treated as absent and the UI asks for a fresh scan.
+     */
+    public static function cached_scan() {
+        $last = get_option( 'pfc_last_scan', array() );
+        if ( ! is_array( $last ) || empty( $last['result'] ) || ! is_array( $last['result'] ) ) { return array(); }
+        $version = (string) ( $last['result']['scan_version'] ?? '' );
+        return $version === PFC_VERSION ? (array) $last['result'] : array();
+    }
+
     private static function database_compat( array $health ) {
         $tables = $health['schema']['tables'];
         $total = (int) ( $health['schema']['total_size'] ?? 0 );

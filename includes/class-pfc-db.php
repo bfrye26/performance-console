@@ -301,6 +301,7 @@ final class PFC_DB {
     public static function cleanup() {
         global $wpdb;
         $runtime = get_option( 'pfc_runtime', array() );
+        if ( ! is_array( $runtime ) ) { $runtime = array(); }
         $days = max( 7, min( 365, (int) ( $runtime['retention_days'] ?? 30 ) ) );
         $raw_days = min( $days, 14 );
         $runs_cut = gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS * $raw_days );
@@ -321,5 +322,17 @@ final class PFC_DB {
         $wpdb->query( $wpdb->prepare( "UPDATE {$issues} SET status='resolved',resolved_at=UTC_TIMESTAMP() WHERE status IN ('open','observing','verifying') AND source='passive' AND last_seen < %s", $passive_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $resolved_cut = gmdate( 'Y-m-d H:i:s', time() - 90 * DAY_IN_SECONDS );
         $wpdb->query( $wpdb->prepare( "DELETE FROM {$issues} WHERE status='resolved' AND last_seen < %s LIMIT 1000", $resolved_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+        // Without this the autoload sample ledger and the change log were the only
+        // stores with no ceiling: option_usage kept a row per option name ever
+        // touched by a sampled request, and changes kept every recorded edit.
+        // Bind the sample ledger to the same window as the sampled runs it is
+        // derived from, so the two cannot disagree.
+        $option_usage = PFC_Utils::table( 'option_usage' );
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$option_usage} WHERE last_seen < %s LIMIT 5000", $runs_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+        $changes = PFC_Utils::table( 'changes' );
+        $changes_cut = gmdate( 'Y-m-d H:i:s', time() - DAY_IN_SECONDS * $days );
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$changes} WHERE created_at < %s LIMIT 5000", $changes_cut ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
     }
 }

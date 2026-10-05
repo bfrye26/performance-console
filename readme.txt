@@ -4,7 +4,7 @@ Tags: performance, database, query, profiler, diagnostics, slow queries
 Requires at least: 6.4
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 3.0.0
+Stable tag: 3.0.4
 License: GPLv2 or later
 
 Production-oriented WordPress diagnostics and remediation with database integrity/schema checks, slow-query attribution, plugin fault analysis, cron/cache/server inspection, RUM and production safety gates.
@@ -29,6 +29,36 @@ Deep signed route profiles provide normalized query fingerprints, duplicate/N+1 
 6. Create and verify a Performance Console database backup before schema/index/repair operations. Large maintenance operations can be run from the guided wp-admin workflow or WP-CLI; CLI remains preferable for the largest tables.
 
 == Changelog ==
+
+= 3.0.4 =
+* Fix a fatal error on hosts without the optional mbstring extension: 19 unguarded mb_substr() calls now route through a helper that falls back to substr(). MB_IN_BYTES/GB_IN_BYTES no longer depend on WordPress having loaded them.
+* Halve finding write load: PFC_Utils::issue() uses one atomic INSERT ... ON DUPLICATE KEY UPDATE instead of a SELECT plus INSERT/UPDATE, removing a race where concurrent requests both treated a finding as new. Falls back to the read-then-write path when the issue_key UNIQUE index is absent.
+* Stop shipping the 12 KB RUM bundle to every visitor. The sampling decision is made server-side, so unsampled visits load nothing. This also fixes a double-sampling bug that multiplied the server sample rate by a client-side roll, meaning the configured RUM rate was never the delivered rate. Adds pfc_rum_sampled and pfc_rum_rate filters, honours doNotTrack and Global Privacy Control, retries a rejected beacon once, refreshes the token before expiry, and reports the largest observed value per metric instead of the last.
+* Fix MariaDB version detection. $wpdb->db_version() reports "5.5.5" on MariaDB, which made online InnoDB rebuild permanently unavailable on MariaDB 10.x hosts while blaming an "old or unrecognized" server.
+* Fix auto-increment exhaustion detection, which could only ever fire for one column type because of a pre-gate applied before the per-type maximum was known.
+* Fix the frontend stylesheet inventory, which missed every stylesheet emitted by WordPress core because the regex required href before rel. Also accept bare (unquoted) width/height/loading attributes.
+* Fix metric_percentile() returning the 600000 ms ingest clamp for the final histogram bucket instead of the observed maximum.
+* Add retention pruning for the autoload sample ledger and change log, the only two stores with no bound.
+* Discard a cached scan report written by a different plugin version instead of rendering it with an unexpected shape.
+* Make wp performance database-fix accept --keep-index, which drop_duplicate_index requires but which was never mapped, leaving the action unreachable from WP-CLI. The command now exits non-zero when a repair reports ok=false, and strips control characters from foreign SQL text before printing it.
+* Validate the signed RUM payload before charging the rate limit, and cap distinct metric series so a public endpoint cannot create unbounded rows.
+* Treat REST booleans correctly: ?deep=false no longer starts a deep scan, and a missing autoload parameter no longer silently disables autoload.
+* Escape "_" in SHOW TABLES LIKE lookups, and record a failed Action Scheduler count instead of reporting it as an empty queue.
+* Re-enable the admin backup controls and report the reason when an export fails or returns an unexpected state, and produce an actionable message instead of "Unexpected token '<'" when a proxy or host error page intercepts the REST call.
+* Tolerate a scalar pfc_runtime option value instead of raising a fatal error on the settings save path.
+* Document the outstanding data-integrity and safety items that were deliberately not changed without a live database to validate them.
+
+= 3.0.3 =
+* Prevent recursive global-hook instrumentation during the signed metabox callback-timing capture.
+* Keep this diagnostic-only correction scoped to one matching save request; normal save behavior is unchanged.
+
+= 3.0.2 =
+* Add callback-level timing for selected save hooks during the signed one-shot legacy metabox capture only.
+* Preserve original hook registration identity and component attribution; callback arguments and values are never stored.
+
+= 3.0.1 =
+* Adds a one-request profiler mode for the block editor's legacy post.php metabox save, distinct from its main REST save.
+* The capture ignores REST and ordinary classic-editor requests and is consumed only by the matching compatibility POST.
 
 = 3.0.0 =
 * Renamed WP Performance Inspector to Performance Console.

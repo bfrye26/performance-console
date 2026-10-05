@@ -1,4 +1,181 @@
-# Performance Console 3.0.0
+# Performance Console 3.0.4
+
+## 3.0.4 audit fixes
+
+This revision addresses findings from a full source audit. PHP lint is clean on
+every file, and each behavioural claim below is covered by an executable check.
+
+### Crash fixed: hosts without the mbstring extension
+
+`mb_substr()` was called in 19 places with no guard. mbstring is an optional PHP
+extension and is not installed everywhere, so on those hosts the profiler,
+database health, admin and CLI code raised a fatal error as soon as they tried to
+truncate SQL, a file path or an error message. All call sites now go through
+`PFC_Utils::truncate()`, which falls back to `substr()`. `MB_IN_BYTES` /
+`GB_IN_BYTES` are no longer borrowed from WordPress either, so the schema, backup
+and health code does not depend on `wp-includes/compat.php` having loaded.
+
+### Halved write load on every scan
+
+`PFC_Utils::issue()` did a `SELECT` and then an `INSERT` or `UPDATE` for every
+finding. It is now one `INSERT ... ON DUPLICATE KEY UPDATE`, so a 200-finding scan
+issues 200 statements instead of 400, and two concurrent requests can no longer
+both decide a finding is new. The upsert confirms the `issue_key` UNIQUE index
+first and falls back to the original read-then-write when it is absent, so
+occurrence counts cannot silently stop accumulating.
+
+The repeat-observation rule that preserves operator decisions now lives in the
+testable `PFC_Utils::next_issue_status()`: accepted risk and unexpired snoozes
+survive re-observation, an expired snooze lapses to the observing state, and a
+passive single observation stays `observing` until a second sighting confirms it.
+
+### RUM no longer costs every visitor 12 KB
+
+The sampling decision used to run in `rum.js`, so the 8.8 KB `web-vitals` bundle
+plus `rum.js` were enqueued and executed for **every** anonymous page view while
+~99.5% of visitors returned immediately. It also multiplied two independent gates
+(the server sample rate *and* a client-side roll), so the configured rate was
+never the delivered rate.
+
+The decision now happens server-side in `PFC_REST::rum_script()`. A sampled visit
+sets a one-hour marker cookie so the choice survives a page-cache hit without
+depending on `Vary`, a `pfc_rum_sampled` filter allows a consent manager to
+override it, and `pfc_rum_rate` allows tuning the rate independently of the
+profiler's sample rate. `rum.js` honours `navigator.doNotTrack` and
+`navigator.globalPrivacyControl` before doing anything else.
+
+RUM beacons also survive better now: the token request uses `keepalive` so it
+completes through an unload, a rejected beacon retries once with a fresh token
+instead of dropping the visit silently, the token is refreshed before expiry
+rather than only on a visibility change, and each metric reports the largest
+value observed instead of the last one — the dashboard labels that column
+"Worst observed", and last-write-wins understated it.
+
+Ingest also validates the signed payload *before* charging the rate limit, so a
+malformed probe or a crawler behind a shared NAT address can no longer exhaust the
+token budget that real visitors need, and a new series ceiling stops an
+unauthenticated caller from creating unbounded metric rows.
+
+### Correctness and housekeeping
+
+- **MariaDB version parsing.** `$wpdb->db_version()` returns `5.5.5` on MariaDB because the raw server string is `5.5.5-10.4.28-MariaDB` and WordPress strips from the first non-numeric character. Comparing `5.5.5` against MariaDB thresholds is always false, so `online_ddl_capabilities()` reported `inplace = false` on MariaDB 10.x and every `rebuild_innodb_index()` / `rebuild_innodb_table()` call aborted with "cannot verify ALGORITHM=INPLACE, LOCK=NONE support" — an entire recovery feature was unusable while the report blamed an "old or unrecognized" server. `PFC_Database_Health::normalize_server_version()` now strips the compatibility prefix from the raw server string, and the backup header records both the raw string and the real version.
+- **Auto-increment exhaustion was undetectable.** `auto_increment_risks()` skipped any table whose next value was below 1e9 *before* computing the per-type maximum. Every 70% threshold except 32-bit unsigned is below 1e9 (tinyint 179, smallint 45 875, mediumint 11 744 051, signed int 1 503 238 553) and `bigint` needs 6.4e18, so the "approaching its numeric limit" issue could only ever fire for one column type. The pre-gate is now trivial and the ratio check is the real gate, so narrow `mediumint`/`int` keys that actually overflow are reported.
+- **Stylesheet inventory was empty on real markup.** The asset regex required `href` before `rel`, but WordPress core emits `<link rel='stylesheet' … href='…' />`, so every core, theme and plugin stylesheet was missing from the asset count, component attribution and third-party host list while the separate stylesheet counter (which used a look-ahead) still counted them. `<link>` tags are now matched first and classified order-independently, and `rel="preload"` only counts as a stylesheet when it declares `as="style"` (a font preload was previously counted as a stylesheet).
+- **Image lazy-load and dimension checks.** `width="100"` and bare `width=100` are both accepted now; requiring quotes reported correctly sized images as missing dimensions on minified HTML.
+- Action Scheduler's table lookup now escapes `_` in `SHOW TABLES LIKE`, so it cannot match an unrelated table name. A failed `COUNT(*)` on the queue is recorded instead of being coerced to `0`, which previously produced a false "queue healthy" verdict.
+- The REST `deep` parameter accepts `false`/`0`/`no` as false instead of `(bool) 'false'` starting an expensive deep scan, and the autoload endpoint requires an explicit value rather than silently disabling autoload when the parameter is absent.
+- `metric_percentile()` returned the bucket ceiling for the final histogram bucket, which is the 600 000 ms ingest clamp — every sample above 10 s was reported as exactly 10 minutes. It now returns the observed maximum there.
+- `cleanup()` never pruned `pfc_option_usage` or `pfc_changes`, the only two stores with no retention bound. The sample ledger now shares the sampled-run window and the change log uses the configured retention.
+- A cached scan report from a different plugin version is discarded instead of rendered with a shape the current release does not expect, which removes a family of undefined-key warnings on the System and Overview views.
+- `wp performance database-fix` accepts `--keep-index`, which `drop_duplicate_index` requires. The action was previously unreachable from WP-CLI even though the admin plan tells large-table operators to use it. The command now also exits non-zero when a repair reports `ok => false` instead of printing a green "Success" line, and it strips control characters from foreign SQL text before printing it.
+- The runtime settings save and `PFC_DB::cleanup()` tolerate a scalar `pfc_runtime` value instead of raising a fatal error.
+- The admin backup runner no longer dead-ends: a `failed` or unexpected status re-enables the controls and reports the reason, a non-JSON response (WAF, proxy or host error page) produces an actionable message instead of `Unexpected token '<'`, and the step loop has a ceiling.
+
+### Known outstanding items (not fixed here)
+
+These were found by the audit and are deliberately left for a decision. The
+first group needs a live MySQL/MariaDB server or a product decision to fix
+safely; the second is a matter of scope.
+
+**Data-integrity risks in the backup path** (highest priority remaining):
+
+- `insertable_columns()` silently drops a column whose name fails
+  `^[A-Za-z0-9_$]+$` instead of quoting it. A column named `meta-key` or
+  `order.total` is omitted from every `INSERT` list and silently takes its
+  DEFAULT on restore, and if every column is filtered the table is exported with
+  zero rows — and the dump still receives its completion marker and SHA-256 and
+  reports as verified.
+- A table with no PRIMARY KEY falls back to `LIMIT/OFFSET` with no `ORDER BY`,
+  so row order is undefined between steps: rows can be duplicated or skipped, the
+  cost is quadratic, and the dump still verifies.
+- `step()` has no lease or compare-and-swap, so two concurrent step calls (two
+  tabs, a retried POST, or CLI plus browser) both append from the same cursor.
+- A short write is reported as success because `file_put_contents()` is compared
+  with `false` rather than checked for the full byte count, and free space is
+  never re-checked per step.
+- The "all tables completed" manifest check is vacuous — it compares
+  `tables_done` against a `table_count` derived from the same list — so the only
+  real completeness evidence is one comment line in the file.
+- A failed re-verification leaves `status='verified'`, `sha256` and `verified_at`
+  in place, so the listing can still show "Integrity checked" for changed bytes.
+  (The mutating-repair gate does rehash by default, so no DDL is authorised by a
+  stale file.)
+
+**Repair-engine safety gaps:**
+
+- `optimize_table()` does not run the lock/transaction, disk-space and
+  online-DDL preflights that the equivalent InnoDB rebuild path requires, even
+  though `OPTIMIZE TABLE` on InnoDB is a full rebuild.
+- `innodb_busy_preflight()` and the disk gate fail open when their inputs are
+  unavailable, which is the opposite of the module's fail-closed rule elsewhere.
+- The orphan-cleanup rollback snapshot is written *after* the delete and its
+  failure is ignored, so a failed snapshot can leave rows deleted with the API
+  still reporting that a snapshot was stored.
+- The malformed-PRIMARY-KEY preview shows a single `ALTER` while execution can
+  add prerequisite `MODIFY COLUMN` / `ADD COLUMN` clauses, so the acknowledged
+  statement is not the executed statement.
+- `repair_core_schema()` / `repair_core_index_drift()` run raw `$wpdb->query()`
+  and bypass `execute_online_ddl()`, so they do not set
+  `lock_wait_timeout` or request an explicit algorithm/lock mode.
+- `SHOW TABLES LIKE %s` is used for the post-dbDelta existence check without
+  `esc_like()`.
+- `innodb_terminate` treats `--transaction-id` as optional, so a recycled thread
+  id can target an unrelated session.
+
+**Scan cost and cardinality:**
+
+- The deep scan runs six unbounded anti-join orphan counts plus up to 150
+  sequential `CHECK TABLE` statements in one web request, gated only by a
+  sampled InnoDB row estimate. A 1.9M-row `wp_postmeta` is below the gate.
+- `mysql_variables()` / `mysql_status()` issue 33 and 34 separate
+  `SHOW … LIKE` statements instead of two reads, and `SHOW TABLE STATUS` returns
+  every table in the database. `inspect()` is re-run by 16 repair call sites.
+- `PFC_Utils::incident()` loads up to 5000 rows and filters in PHP to find one
+  key, though `incident_key` is indexed.
+- The Findings view renders every incident with no pagination and inlines the
+  full search text into each row's `data-search` attribute.
+- On multisite, `uninstall.php` only removes the current site's tables and
+  options, and the storage-directory hash is derived from the current
+  `AUTH_KEY`/`DB_NAME`, so a site that rotated salts leaves its backup
+  directories behind.
+- Backups may land inside the web root when the outside-docroot and temp
+  candidates are unavailable. The `.htaccess`/`web.config` deny rules are written
+  but never verified, and nginx ignores `.htaccess`.
+
+**Correctness on specific HTML/plugin shapes:**
+
+- `component_from_issue()` reads the component from the *title* first and only
+  then from the message; the two branches use different patterns, so the same
+  problem wrapped in `<code>` produces a different incident key than the
+  unwrapped form and incident grouping fragments. Fixing it re-keys existing
+  incidents once.
+- Attribute regexes elsewhere still use `[^>]*`, so a `>` inside a quoted
+  attribute truncates the match.
+- `inline_bytes()` counts JSON-LD and template blocks as inline JavaScript, and
+  `dom_nodes_estimate` counts markup inside comments and scripts.
+
+**Scope decision — the plugin does not optimise, only diagnose:**
+
+There is no object-cache drop-in, no page-cache output buffer, no query-result
+cache/deduplication, no asset minify/defer/delay, no Heartbeat control, no
+revision-limit control and no CDN integration. Combined with the MU bootstrap
+already being used to install an early profiler, that is the largest remaining
+gap against plugins that actually change front-end delivery. Adding those
+features changes the risk profile substantially (it means writing
+`advanced-cache.php`-class files and mutating `wp_options` on the hot path), so
+it should be a deliberate product decision rather than an incremental fix.
+
+## 3.0.3 save-capture recursion fix
+
+Prevents the one-shot callback-timing observer from re-entering itself through WordPress's filterable sanitizers while scanning the global hook stream. The change affects only the signed legacy-metabox diagnostic capture; normal requests and save behavior are unchanged.
+
+## 3.0.2 legacy metabox callback timing
+
+The signed one-shot legacy metabox capture now reports inclusive elapsed time per callback for selected post-save hooks and nested post-meta/cache-clean hooks. It records callback name, component, hook, priority, call count, total, and maximum duration only. Callback arguments, post content, metadata values, and return data are not recorded. By-reference callbacks are left untouched and are not timed. Timings include nested work and overlap, so row totals must not be added together. Wrapping is temporary and limited to the matching signed metabox request; callbacks added after a hook starts retain native behavior but may not be timed.
+
+## 3.0.1 legacy metabox save profiling
+
+Adds a separate one-request capture for the block editor's follow-up `post.php` compatibility save. It matches only the `meta-box-loader=1` POST with the editor's `editpost` action and a valid post ID; the main REST save and ordinary classic-editor saves do not consume this capture. Existing manual-save and autosave capture behavior is unchanged.
 
 ## 3.0.0 rename and migration
 
@@ -28,11 +205,15 @@ Performance Console is the new name of WP Performance Inspector. WordPress.org h
 
 ### Development checks
 
-Run `php tests/run.php` for PHP regression tests. Run `npm ci --ignore-scripts`, `npm run build:rum`, then `npm test` for the pinned vendor artifact and JavaScript transport tests. WordPress does not require Node or npm at runtime. Ship `assets/vendor/web-vitals/`, including its Apache-2.0 license, with the plugin.
+Run `php tests/run.php` for the PHP regression suite (33 cases). Run `npm ci --ignore-scripts`, `npm run build:rum`, then `npm test` for the pinned vendor artifact and the JavaScript transport tests (7 cases). WordPress does not require Node or npm at runtime. Ship `assets/vendor/`, including the web-vitals Apache-2.0 license, with the plugin. `.github/workflows/tests.yml` runs all of this on PHP 7.4, 8.2, 8.3 and 8.4 plus Node 22.
 
-After installing this update, open the Performance Console admin page to refresh its MU bootstrap and purge cached HTML through your existing page-cache/CDN controls so visitors receive the new script dependency. The RUM panel starts with version-2 data only. On Windows, `scripts/build-release.ps1` builds a runtime-only ZIP and refuses to overwrite an existing archive.
+Note that the workflow installs mbstring. That is why a fatal error from unguarded `mb_substr()` calls went unnoticed until 3.0.4: CI always had the extension, while it is optional at runtime. Consider running one matrix leg without mbstring so optional-extension regressions fail the build.
 
-See [IMPROVEMENT-PLAN.md](IMPROVEMENT-PLAN.md) for the remaining work toward wider compatibility and guided remediation. This release is the trust-and-measurement foundation, not a universal automatic optimizer.
+WordPress does not require Node or npm at runtime. Ship `assets/vendor/web-vitals/` (currently the pinned 6.2.1 build), including its Apache-2.0 license, with the plugin.
+
+After installing this update, open the Performance Console admin page to refresh its MU bootstrap and purge cached HTML through your existing page-cache/CDN controls so visitors receive the new script dependency. The RUM panel starts with version-2 data only.
+
+Build the release ZIP with `scripts/build-release.ps1`, which refuses to overwrite an existing archive.
 
 ## 2.1.1 capture workflow polish
 
@@ -270,4 +451,6 @@ Large-table exact checks are skipped in ordinary web scans. Expensive integrity/
 
 The plugin does not overwrite `db.php`, `object-cache.php` or `advanced-cache.php`. It does not automatically drop indexes, convert table engines, convert collations, restore missing data or run unrestricted schema changes.
 
-See `docs/PRODUCTION.md` before deployment to a high-traffic production site.
+Before deploying to a high-traffic production site: set the server sample rate to a value you are willing to pay for, confirm the RUM rate is the rate you want *delivered* (it is no longer multiplied by the server sample rate), verify the MU bootstrap is installed and current, and confirm the maintenance cron (`pfc_daily_maintenance`) actually runs — retention pruning, including the autoload sample ledger and change log, depends on it.
+
+See [docs/PRODUCTION.md](docs/PRODUCTION.md) before deployment to a high-traffic production site.

@@ -124,7 +124,7 @@ final class PFC_Database_Backup {
         $time_budget = max( 1.5, min( 20.0, (float) apply_filters( 'pfc_backup_step_time_budget', self::STEP_TIME_BUDGET ) ) );
         $php_limit = (int) ini_get( 'max_execution_time' );
         if ( $php_limit > 0 ) { $time_budget = min( $time_budget, max( 1.0, $php_limit - 2.0 ) ); }
-        $byte_budget = max( MB_IN_BYTES, min( 64 * MB_IN_BYTES, (int) apply_filters( 'pfc_backup_step_target_bytes', self::STEP_TARGET_BYTES ) ) );
+        $byte_budget = max( PFC_Utils::MB_IN_BYTES, min( 64 * PFC_Utils::MB_IN_BYTES, (int) apply_filters( 'pfc_backup_step_target_bytes', self::STEP_TARGET_BYTES ) ) );
 
         while ( true ) {
             $idx = (int) ( $state['table_index'] ?? 0 );
@@ -412,12 +412,17 @@ final class PFC_Database_Backup {
 
     private static function header_sql( $scope, array $tables ) {
         global $wpdb;
-        $server = sanitize_text_field( (string) $wpdb->db_version() );
+        // Record the raw server string plus the normalized version. On MariaDB
+        // $wpdb->db_version() reports the "5.5.5" client-compatibility prefix,
+        // which made the header claim a MySQL 5.5 server for a MariaDB 10.x host.
+        $server_raw = method_exists( $wpdb, 'db_server_info' ) ? (string) $wpdb->db_server_info() : (string) $wpdb->db_version();
+        $server = sanitize_text_field( $server_raw );
+        $server_version = class_exists( 'PFC_Database_Health' ) ? PFC_Database_Health::normalize_server_version( $server_raw ) : $server;
         return "-- Performance Console database backup\n"
             . '-- Created UTC: ' . gmdate( 'c' ) . "\n"
             . '-- Performance Console version: ' . PFC_VERSION . "\n"
             . '-- WordPress version: ' . get_bloginfo( 'version' ) . "\n"
-            . '-- Database server: ' . $server . "\n"
+            . '-- Database server: ' . $server . ' (version ' . sanitize_text_field( $server_version ) . ")\n"
             . '-- Scope: ' . $scope . "\n"
             . '-- Base tables: ' . count( (array) $tables['tables'] ) . "\n"
             . '-- Views skipped: ' . count( (array) $tables['views'] ) . "\n"
@@ -511,7 +516,7 @@ final class PFC_Database_Backup {
         if ( ! $rows || ! $columns ) { return ''; }
         $quoted_columns = implode( ',', array_map( static function ( $column ) { return '`' . $column . '`'; }, $columns ) );
         $prefix = 'INSERT INTO `' . $table . '` (' . $quoted_columns . ') VALUES\n';
-        $target = max( 256 * 1024, min( 4 * MB_IN_BYTES, (int) apply_filters( 'pfc_backup_insert_target_bytes', self::BATCH_TARGET_BYTES ) ) );
+        $target = max( 256 * 1024, min( 4 * PFC_Utils::MB_IN_BYTES, (int) apply_filters( 'pfc_backup_insert_target_bytes', self::BATCH_TARGET_BYTES ) ) );
         $out = '';
         $values = array();
         $bytes = strlen( $prefix );
@@ -545,7 +550,7 @@ final class PFC_Database_Backup {
         }
         $free = @disk_free_space( $dir );
         if ( false === $free ) { return array( 'available' => false, 'estimated_db_bytes' => $estimated, 'free_bytes' => 0, 'required_bytes' => 0, 'ok' => true ); }
-        $required = max( 50 * MB_IN_BYTES, (int) ( $estimated * 1.25 ) );
+        $required = max( 50 * PFC_Utils::MB_IN_BYTES, (int) ( $estimated * 1.25 ) );
         return array( 'available' => true, 'estimated_db_bytes' => $estimated, 'free_bytes' => (int) $free, 'required_bytes' => $required, 'ok' => (int) $free >= $required );
     }
 

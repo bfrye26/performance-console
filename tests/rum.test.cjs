@@ -12,6 +12,10 @@ function setup({ beacon = true, late = false } = {}) {
     const context = {
         performance: {}, pfcRum: { rate: 1, route_group: 'frontend:home', endpoint: '/rum', tokenEndpoint: '/token' },
         webVitals: {}, document: { visibilityState: 'visible' }, Blob, Date, Promise,
+        // The token-refresh scheduler uses timers. A real browser always has them;
+        // the sandbox needs them present (as no-ops) so the promise chain that
+        // assigns the token is not broken by a ReferenceError.
+        setTimeout: () => 0, clearTimeout: () => {},
         navigator: { sendBeacon(url, body) { beacons.push(body); return beacon; } },
         fetch(url, options) {
             requests.push({ url, options });
@@ -68,4 +72,38 @@ test('bfcache restore starts a new sample without stale metric values', async ()
 test('does not fabricate zero measurements on unsupported browsers', async () => {
     const h = setup(); await flush(); h.emit('pagehide'); await flush();
     assert.equal(h.beacons.length, 0);
+});
+
+test('a host without timer functions still sends (token refresh must not break the send path)', async () => {
+    // Regression guard: scheduleRefresh() runs inside the token promise chain, so
+    // a missing setTimeout/clearTimeout used to throw there, silently dropping the
+    // visit's only beacon. Delete the timers to prove the send path survives.
+    const h = setup(); await flush();
+    delete h.context.setTimeout;
+    delete h.context.clearTimeout;
+    h.metric('LCP', 1800); h.emit('pagehide'); await flush();
+    assert.equal(h.beacons.length, 1);
+    const body = JSON.parse(await h.beacons[0].text());
+    assert.equal(body.lcp, 1800);
+});
+
+test('honours doNotTrack and Global Privacy Control before collecting anything', async () => {
+    for (const signal of [{ doNotTrack: '1' }, { globalPrivacyControl: true }]) {
+        const callbacks = {}, requests = [], beacons = [];
+        const context = {
+            performance: {}, pfcRum: { endpoint: '/rum', tokenEndpoint: '/token', route_group: 'frontend:home' },
+            webVitals: {}, document: { visibilityState: 'visible' }, Blob, Date, Promise,
+            setTimeout: () => 0, clearTimeout: () => {},
+            navigator: Object.assign({ sendBeacon(url, body) { beacons.push(body); return true; } }, signal),
+            fetch(url) { requests.push(url); return Promise.resolve({ ok: true, json: () => Promise.resolve({}) }); },
+            addEventListener() {}, setInterval() {},
+        };
+        for (const name of ['TTFB', 'FCP', 'LCP', 'CLS', 'INP']) context.webVitals['on' + name] = cb => { callbacks[name] = cb; };
+        context.window = context;
+        vm.runInNewContext(source, context);
+        await flush();
+        assert.equal(Object.keys(callbacks).length, 0, 'no observers registered when opted out');
+        assert.equal(requests.length, 0, 'no token request when opted out');
+        assert.equal(beacons.length, 0);
+    }
 });

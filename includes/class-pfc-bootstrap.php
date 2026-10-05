@@ -2,7 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class PFC_Bootstrap {
-    const VERSION = '2.0.0';
+    const VERSION = '2.1.0';
     const SAVE_COOKIE = 'pfc_capture_save';
 
     public static function path() { return trailingslashit( WPMU_PLUGIN_DIR ) . '000-performance-console-bootstrap.php'; }
@@ -70,7 +70,7 @@ final class PFC_Bootstrap {
     }
 
     public static function save_capture_value( $user_id, $kind, $expires, $capture_id, $secret = '' ) {
-        $kind = in_array( $kind, array( 'manual', 'autosave' ), true ) ? $kind : 'manual';
+        $kind = in_array( $kind, array( 'manual', 'autosave', 'metabox' ), true ) ? $kind : 'manual';
         $payload = absint( $user_id ) . '|' . absint( $expires ) . '|' . $kind . '|' . sanitize_text_field( (string) $capture_id );
         $secret = '' !== $secret ? (string) $secret : (string) get_option( 'pfc_secret' );
         return $payload . '|' . hash_hmac( 'sha256', $payload, $secret );
@@ -81,7 +81,7 @@ final class PFC_Bootstrap {
         if ( 5 !== count( $parts ) ) { return false; }
         list( $user_id, $expires, $kind, $capture_id, $signature ) = $parts;
         $now = null === $now ? time() : absint( $now );
-        if ( ! ctype_digit( $user_id ) || ! ctype_digit( $expires ) || ! in_array( $kind, array( 'manual', 'autosave' ), true ) || ! preg_match( '/^[a-f0-9-]{36}$/i', $capture_id ) || ! preg_match( '/^[a-f0-9]{64}$/', $signature ) ) { return false; }
+        if ( ! ctype_digit( $user_id ) || ! ctype_digit( $expires ) || ! in_array( $kind, array( 'manual', 'autosave', 'metabox' ), true ) || ! preg_match( '/^[a-f0-9-]{36}$/i', $capture_id ) || ! preg_match( '/^[a-f0-9]{64}$/', $signature ) ) { return false; }
         if ( (int) $expires < $now || (int) $expires > $now + 15 * MINUTE_IN_SECONDS ) { return false; }
         $payload = $user_id . '|' . $expires . '|' . $kind . '|' . $capture_id;
         $secret = '' !== $secret ? (string) $secret : (string) get_option( 'pfc_secret' );

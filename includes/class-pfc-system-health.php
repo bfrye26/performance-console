@@ -299,7 +299,7 @@ final class PFC_System_Health {
         }
         $findings = array();
         foreach ( array_slice( $sources, 0, 2 ) as $path ) {
-            foreach ( self::tail_errors( $path, $deep ? 4 * MB_IN_BYTES : MB_IN_BYTES ) as $item ) {
+            foreach ( self::tail_errors( $path, $deep ? 4 * PFC_Utils::MB_IN_BYTES : PFC_Utils::MB_IN_BYTES ) as $item ) {
                 $key = md5( $item['type'] . '|' . $item['component'] . '|' . $item['fingerprint'] );
                 if ( ! isset( $findings[ $key ] ) ) { $findings[ $key ] = $item + array( 'count' => 0 ); }
                 $findings[ $key ]['count']++;
@@ -320,7 +320,7 @@ final class PFC_System_Health {
         if ( ! is_readable( $path ) || ! is_file( $path ) ) { return array(); }
         $size = @filesize( $path );
         if ( false === $size || 0 === $size ) { return array(); }
-        $bytes = max( 32768, min( 8 * MB_IN_BYTES, (int) $bytes ) );
+        $bytes = max( 32768, min( 8 * PFC_Utils::MB_IN_BYTES, (int) $bytes ) );
         $handle = @fopen( $path, 'rb' );
         if ( ! $handle ) { return array(); }
         $offset = max( 0, $size - $bytes );
@@ -346,7 +346,7 @@ final class PFC_System_Health {
             $safe = preg_replace( '/\b\d+(?:\.\d+)?\b/', '?', $safe );
             $safe = preg_replace( '/https?:\/\/\S+/i', '[url]', $safe );
             $safe = preg_replace( '/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', '[email]', $safe );
-            $safe = trim( mb_substr( $safe, 0, 600 ) );
+            $safe = trim( PFC_Utils::truncate( $safe, 600 ) );
             $out[] = array( 'type' => $type, 'component' => $component, 'file' => $file, 'fingerprint' => $safe );
         }
         return $out;
@@ -409,17 +409,17 @@ final class PFC_System_Health {
             if ( $plugin['included_php_files_current_request'] >= 150 ) {
                 PFC_Utils::issue( 'plugin', 'warning', 'Plugin loads a very large PHP file graph', '<code>' . esc_html( $plugin['name'] ) . '</code> accounted for at least ' . intval( $plugin['included_php_files_current_request'] ) . ' included PHP files on the current request.', $plugin['included_php_files_current_request'] . ' PHP files', 'Profile the plugin on representative frontend/admin routes and verify OPcache capacity. Consider disabling unused modules if the plugin supports it.' );
             }
-            if ( (int) $plugin['autoload_bytes_estimate'] >= MB_IN_BYTES ) {
+            if ( (int) $plugin['autoload_bytes_estimate'] >= PFC_Utils::MB_IN_BYTES ) {
                 PFC_Utils::issue( 'plugin', 'high', 'Plugin appears to own a large autoload footprint', '<code>' . esc_html( $plugin['name'] ) . '</code> matches approximately ' . esc_html( size_format( (int) $plugin['autoload_bytes_estimate'] ) ) . ' of autoloaded option data by option-name prefix.', size_format( (int) $plugin['autoload_bytes_estimate'] ), 'Treat ownership as a prefix-based estimate. Verify the listed option names and sampled usage before changing autoload behaviour.' );
             }
-            if ( (int) $plugin['database_bytes_estimate'] >= 5 * GB_IN_BYTES ) {
+            if ( (int) $plugin['database_bytes_estimate'] >= 5 * PFC_Utils::GB_IN_BYTES ) {
                 PFC_Utils::issue( 'plugin', 'warning', 'Plugin appears to own a very large database footprint', '<code>' . esc_html( $plugin['name'] ) . '</code> matches approximately ' . esc_html( size_format( (int) $plugin['database_bytes_estimate'] ) ) . ' of custom tables by table-name prefix.', size_format( (int) $plugin['database_bytes_estimate'] ), 'Treat ownership as an estimate. Check retention, indexes, cleanup jobs and growth rate for the matching custom tables.' );
             }
         }
 
         foreach ( (array) ( $health['errors']['source_details'] ?? array() ) as $log ) {
-            if ( null === $log['bytes'] || $log['bytes'] < 100 * MB_IN_BYTES ) { continue; }
-            $severity = $log['bytes'] >= GB_IN_BYTES ? 'high' : 'warning';
+            if ( null === $log['bytes'] || $log['bytes'] < 100 * PFC_Utils::MB_IN_BYTES ) { continue; }
+            $severity = $log['bytes'] >= PFC_Utils::GB_IN_BYTES ? 'high' : 'warning';
             PFC_Utils::issue( 'errors', $severity, 'PHP/WordPress error log is very large', '<code>' . esc_html( $log['path'] ) . '</code> is approximately ' . esc_html( size_format( $log['bytes'] ) ) . '.', size_format( $log['bytes'] ), 'Repeated logging can consume disk and add I/O under load. Rotate/archive the log, then fix the highest-frequency errors instead of merely deleting the file.' );
         }
 
