@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Performance Console
  * Description: Production-oriented WordPress performance diagnostics, database/plugin fault detection, slow-query attribution, server/cache/job checks, RUM and safe remediation.
- * Version:     3.0.0
+ * Version:     3.0.4
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * Author:      CGMagazine
@@ -12,7 +12,7 @@
 
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-define( 'PFC_VERSION', '3.0.0' );
+define( 'PFC_VERSION', '3.0.4' );
 define( 'PFC_FILE', __FILE__ );
 define( 'PFC_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PFC_URL', plugin_dir_url( __FILE__ ) );

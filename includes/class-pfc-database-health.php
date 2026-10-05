@@ -20,12 +20,17 @@ final class PFC_Database_Health {
         $orphans = self::orphan_checks( $tables, $deep, $force_large );
         $options = self::options_health( $deep );
         $innodb = self::innodb_diagnostics( $deep );
-        $innodb['online_ddl'] = self::online_ddl_capabilities( $wpdb->db_version(), (string) ( $storage_engines['family'] ?? 'mysql' ) );
+        // Prefer the raw server string: on MariaDB, $wpdb->db_version() reports the
+        // "5.5.5" client-compatibility prefix rather than the real version.
+        $raw_version = method_exists( $wpdb, 'db_server_info' ) ? (string) $wpdb->db_server_info() : (string) $wpdb->db_version();
+        $server_version = self::normalize_server_version( $raw_version );
+        $innodb['online_ddl'] = self::online_ddl_capabilities( $raw_version, (string) ( $storage_engines['family'] ?? 'mysql' ) );
         $innodb['configuration_advice'] = self::innodb_configuration_advice( $schema, $variables, $status, $innodb );
 
         return array(
             'server'        => array(
-                'version'    => $wpdb->db_version(),
+                'version'    => $server_version,
+                'version_raw' => $raw_version,
                 'variables'  => $variables,
                 'status'     => $status,
                 'processes'  => $processes,
@@ -321,7 +326,7 @@ final class PFC_Database_Health {
         foreach ( preg_split( '/\r?\n/', $section ) as $line ) {
             $line = trim( (string) $line );
             if ( ! preg_match( '/^(SELECT|UPDATE|INSERT|DELETE|REPLACE)\b/i', $line ) ) { continue; }
-            $normalized = PFC_Utils::normalize_sql( mb_substr( $line, 0, 2000 ) );
+            $normalized = PFC_Utils::normalize_sql( PFC_Utils::truncate( $line, 2000 ) );
             if ( $normalized && ! in_array( $normalized, $queries, true ) ) { $queries[] = $normalized; }
             if ( count( $queries ) >= 6 ) { break; }
         }
@@ -382,11 +387,29 @@ final class PFC_Database_Health {
         return self::innodb_diagnostics( true );
     }
 
+    /**
+     * Normalize a raw MySQL/MariaDB server string into a comparable version.
+     *
+     * WordPress' $wpdb->db_version() strips everything from the first non-numeric
+     * character, so on MariaDB it returns "5.5.5" for a server that is really
+     * 10.4.28: the raw string is "5.5.5-10.4.28-MariaDB", where 5.5.5 is a
+     * compatibility prefix that MySQL clients require. Comparing "5.5.5" against
+     * a MariaDB 10.x threshold is always false, which permanently disabled online
+     * InnoDB rebuild on those hosts.
+     */
+    public static function normalize_server_version( $raw ) {
+        $raw = trim( (string) $raw );
+        // Drop the client-compatibility prefix, then any suffix such as "-MariaDB"
+        // or "-log", keeping only the real version number.
+        $stripped = preg_replace( '/^5\.5\.5-/', '', $raw );
+        if ( ! preg_match( '/^\d+\.\d+(?:\.\d+)?/', (string) $stripped, $m ) ) { return '0.0.0'; }
+        return $m[0];
+    }
+
     /** Conservative server/version feature map. Mutating code still explicitly requests the algorithm and fails closed. */
     public static function online_ddl_capabilities( $version, $family = 'mysql' ) {
         $family = 'mariadb' === strtolower( (string) $family ) ? 'mariadb' : 'mysql';
-        $version = preg_replace( '/[^0-9.].*$/', '', (string) $version );
-        if ( ! preg_match( '/^\d+\.\d+(?:\.\d+)?/', $version, $m ) ) { $version = '0.0.0'; } else { $version = $m[0]; }
+        $version = self::normalize_server_version( $version );
         $inplace = 'mariadb' === $family ? version_compare( $version, '10.2.0', '>=' ) : version_compare( $version, '5.6.17', '>=' );
         $instant = 'mariadb' === $family ? version_compare( $version, '10.3.2', '>=' ) : version_compare( $version, '8.0.12', '>=' );
         return array(
@@ -416,13 +439,13 @@ final class PFC_Database_Health {
         if ( $force_recovery > 0 ) {
             $advice[] = array( 'severity' => 'critical', 'title' => 'InnoDB force recovery is enabled', 'detail' => 'innodb_force_recovery=' . $force_recovery, 'recommendation' => 'Treat the server as being in emergency recovery mode. Extract/verify data and return to normal mode; recovery mode does not repair corruption.' );
         }
-        if ( $pool > 0 && $dataset > 0 && $pool < min( $dataset, 512 * MB_IN_BYTES ) ) {
+        if ( $pool > 0 && $dataset > 0 && $pool < min( $dataset, 512 * PFC_Utils::MB_IN_BYTES ) ) {
             $advice[] = array( 'severity' => 'warning', 'title' => 'InnoDB buffer pool is small relative to the dataset', 'detail' => size_format( $pool ) . ' buffer pool versus approximately ' . size_format( $dataset ) . ' of InnoDB tables/indexes.', 'recommendation' => 'Size the buffer pool with the database server memory budget and workload in mind. Do not allocate RAM solely from this ratio; first confirm the database host has headroom.' );
         }
         if ( null !== $hit && $requests > 10000 && $hit < 0.995 ) {
             $advice[] = array( 'severity' => $hit < 0.98 ? 'high' : 'warning', 'title' => 'InnoDB buffer-pool hit rate is lower than expected', 'detail' => round( 100 * $hit, 3 ) . '% calculated hit rate.', 'recommendation' => 'Prioritize scan-heavy/slow queries and working-set size before increasing memory. A larger buffer pool may help only when server RAM is available.' );
         }
-        if ( $redo > 0 && $dataset > 4 * GB_IN_BYTES && $redo < 512 * MB_IN_BYTES ) {
+        if ( $redo > 0 && $dataset > 4 * PFC_Utils::GB_IN_BYTES && $redo < 512 * PFC_Utils::MB_IN_BYTES ) {
             $advice[] = array( 'severity' => 'warning', 'title' => 'Redo capacity is small for a large InnoDB dataset', 'detail' => size_format( $redo ) . ' configured redo capacity for approximately ' . size_format( $dataset ) . ' of InnoDB data/indexes.', 'recommendation' => 'For write-heavy workloads, review redo sizing and checkpoint pressure with server metrics. This is a server configuration change and is never applied automatically.' );
         }
         if ( ! empty( $innodb['history_list_length'] ) && (int) $innodb['history_list_length'] > 100000 ) {
@@ -841,7 +864,13 @@ final class PFC_Database_Health {
         $old = $wpdb->suppress_errors( true );
         foreach ( $tables as $table ) {
             $next = (float) ( $table['auto_increment'] ?? 0 );
-            if ( $next < 1000000000 ) { continue; }
+            // The old code skipped anything below 1e9 BEFORE the per-type maximum
+            // was known. Every 70% threshold except int-unsigned is below 1e9
+            // (tinyint 179, smallint 45875, mediumint 11744051, int 1503238553),
+            // so the narrow types that actually overflow could never be reported.
+            // The ratio check below is the real gate; this only skips the
+            // pointless SHOW COLUMNS for tables with a trivial counter.
+            if ( $next < 10 ) { continue; }
             $name = (string) ( $table['name'] ?? '' );
             if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $name ) ) { continue; }
             $columns = $wpdb->get_results( "SHOW COLUMNS FROM `{$name}`", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
@@ -1052,7 +1081,7 @@ final class PFC_Database_Health {
             if ( $table['rows_estimate'] > 100000 && $table['engine'] && 0 !== strcasecmp( $table['engine'], 'InnoDB' ) ) {
                 PFC_Utils::issue( 'database', 'warning', 'Large table is not using InnoDB', '<code>' . esc_html( $table['name'] ) . '</code> uses ' . esc_html( $table['engine'] ) . '.', number_format_i18n( $table['rows_estimate'] ) . ' estimated rows', 'Review the plugin/application requirements and consider InnoDB on staging. Do not convert a large production table without a migration plan.' );
             }
-            if ( $table['size'] > 100 * MB_IN_BYTES && $table['data_free'] > max( 100 * MB_IN_BYTES, $table['size'] * 0.25 ) ) {
+            if ( $table['size'] > 100 * PFC_Utils::MB_IN_BYTES && $table['data_free'] > max( 100 * PFC_Utils::MB_IN_BYTES, $table['size'] * 0.25 ) ) {
                 PFC_Utils::issue( 'database', 'warning', 'Table has substantial reclaimable/fragmented space', '<code>' . esc_html( $table['name'] ) . '</code> reports ' . esc_html( size_format( $table['data_free'] ) ) . ' of free space.', size_format( $table['data_free'] ), 'Investigate churn first. If reclaiming the space is justified, use the Repair Centre maintenance workflow after a verified backup, or WP-CLI/DBA tooling for the largest table.' );
             }
             $comment = strtolower( $table['comment'] );
@@ -1110,7 +1139,7 @@ final class PFC_Database_Health {
             $deadlock = (array) ( $innodb['deadlock'] ?? array() );
             $detail = 'SHOW ENGINE INNODB STATUS contains a latest-detected-deadlock section.';
             if ( ! empty( $deadlock['tables'] ) ) { $detail .= ' Tables: <code>' . esc_html( implode( ', ', array_slice( (array) $deadlock['tables'], 0, 8 ) ) ) . '</code>.'; }
-            if ( ! empty( $deadlock['queries'][0] ) ) { $detail .= ' Example normalized query: <code>' . esc_html( mb_substr( (string) $deadlock['queries'][0], 0, 700 ) ) . '</code>.'; }
+            if ( ! empty( $deadlock['queries'][0] ) ) { $detail .= ' Example normalized query: <code>' . esc_html( PFC_Utils::truncate( (string) $deadlock['queries'][0], 700 ) ) . '</code>.'; }
             PFC_Utils::issue( 'database', 'high', 'InnoDB reports a recent deadlock', $detail, 'Transaction rollback/retry risk', 'Use the parsed deadlock participants and lock graph to identify code paths that acquire the same rows in different orders. Shorten transactions and enforce a consistent write order.' );
         }
         if ( ! empty( $innodb['foreign_key_error_detected'] ) ) {
@@ -1130,14 +1159,14 @@ final class PFC_Database_Health {
             if ( ! empty( $edge['table'] ) ) { $detail .= ' for <code>' . esc_html( (string) $edge['table'] ) . '</code>'; }
             if ( ! empty( $edge['index'] ) ) { $detail .= ' index <code>' . esc_html( (string) $edge['index'] ) . '</code>'; }
             $detail .= '.';
-            if ( ! empty( $edge['blocking_query'] ) ) { $detail .= ' Blocking query: <code>' . esc_html( mb_substr( (string) $edge['blocking_query'], 0, 600 ) ) . '</code>.'; }
+            if ( ! empty( $edge['blocking_query'] ) ) { $detail .= ' Blocking query: <code>' . esc_html( PFC_Utils::truncate( (string) $edge['blocking_query'], 600 ) ) . '</code>.'; }
             PFC_Utils::issue( 'database', 'high', 'InnoDB blocker/waiter relationship detected', $detail, 'Blocked transaction', 'Fix the blocking code path rather than automatically killing the connection. Reduce transaction duration, batch writes, and acquire rows in a consistent order.' );
         }
         foreach ( array_slice( (array) ( $innodb['transactions'] ?? array() ), 0, 10 ) as $trx ) {
             $age = isset( $trx['age_seconds'] ) ? (int) $trx['age_seconds'] : 0;
             if ( $age < 30 ) { continue; }
             $detail = 'Transaction has been open for ' . $age . ' seconds; ' . intval( $trx['rows_locked'] ?? 0 ) . ' row(s) locked and ' . intval( $trx['rows_modified'] ?? 0 ) . ' row(s) modified.';
-            if ( ! empty( $trx['query'] ) ) { $detail .= ' Query: <code>' . esc_html( mb_substr( (string) $trx['query'], 0, 600 ) ) . '</code>'; }
+            if ( ! empty( $trx['query'] ) ) { $detail .= ' Query: <code>' . esc_html( PFC_Utils::truncate( (string) $trx['query'], 600 ) ) . '</code>'; }
             PFC_Utils::issue( 'database', $age >= 300 ? 'critical' : 'high', 'Long-running InnoDB transaction is open', $detail, $age . ' seconds', 'Open Performance → InnoDB Transaction Manager to inspect the owning connection. If it is stuck or abandoned, Performance Console can terminate the connection and roll back its uncommitted transaction after explicit acknowledgement. Then fix the request/job so it commits or rolls back sooner.' );
         }
 
@@ -1175,11 +1204,11 @@ final class PFC_Database_Health {
             }
         }
         foreach ( array_slice( $process['long_running'] ?? array(), 0, 5 ) as $p ) {
-            PFC_Utils::issue( 'database', $p['time'] >= 30 ? 'critical' : 'high', 'Long-running database query is active', '<code>' . esc_html( mb_substr( $p['query'], 0, 800 ) ) . '</code><br>State: ' . esc_html( $p['state'] ), $p['time'] . ' seconds', 'Use EXPLAIN and the responsible request/plugin trace to reduce the query, add an appropriate index, or break the work into batches.' );
+            PFC_Utils::issue( 'database', $p['time'] >= 30 ? 'critical' : 'high', 'Long-running database query is active', '<code>' . esc_html( PFC_Utils::truncate( $p['query'], 800 ) ) . '</code><br>State: ' . esc_html( $p['state'] ), $p['time'] . ' seconds', 'Use EXPLAIN and the responsible request/plugin trace to reduce the query, add an appropriate index, or break the work into batches.' );
         }
 
         $opt = $health['options'];
-        if ( $opt['autoload_bytes'] > 2 * MB_IN_BYTES ) {
+        if ( $opt['autoload_bytes'] > 2 * PFC_Utils::MB_IN_BYTES ) {
             PFC_Utils::issue( 'database', 'critical', 'Autoloaded options are oversized', 'WordPress is loading approximately ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . ' of option data into memory.', size_format( $opt['autoload_bytes'] ), 'Review the largest options, map them to their owning plugins, and disable autoload only when the option is not needed on most requests.' );
         } elseif ( $opt['autoload_bytes'] > 800 * KB_IN_BYTES ) {
             PFC_Utils::issue( 'database', 'warning', 'Autoloaded options are elevated', 'Autoloaded option data is ' . esc_html( size_format( $opt['autoload_bytes'] ) ) . '.', size_format( $opt['autoload_bytes'] ), 'Review the largest autoloaded options and remove stale plugin data.' );
@@ -1192,7 +1221,7 @@ final class PFC_Database_Health {
             }
         }
         foreach ( $opt['largest_autoload'] as $row ) {
-            if ( 'rewrite_rules' === $row['option_name'] && (int) $row['bytes'] > MB_IN_BYTES ) {
+            if ( 'rewrite_rules' === $row['option_name'] && (int) $row['bytes'] > PFC_Utils::MB_IN_BYTES ) {
                 PFC_Utils::issue( 'database', 'high', 'Rewrite rules option is extremely large', '<code>rewrite_rules</code> is approximately ' . esc_html( size_format( (int) $row['bytes'] ) ) . '.', size_format( (int) $row['bytes'] ), 'Audit plugins/post types/taxonomies creating rewrite rules and remove stale rules. Flush rewrite rules once after the cause is fixed, not on every request.' );
             }
         }

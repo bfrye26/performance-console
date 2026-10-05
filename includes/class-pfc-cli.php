@@ -78,12 +78,15 @@ final class PFC_CLI {
         WP_CLI\Utils\format_items( 'table', $plans, array( 'safety','title','detail','action','available' ) );
     }
 
-    /** Run an explicit database fix. ## OPTIONS <action> [--type=<type>] [--table=<table>] [--index=<index>] [--option=<option>] [--limit=<rows>] [--change-id=<id>] [--backup-id=<id>] [--thread-id=<id>] [--transaction-id=<id>] [--backup-confirmed] [--danger-confirmed] [--data-loss-confirmed] [--rollback-confirmed] [--high-rollback-confirmed] [--force-large] */
+    /** Run an explicit database fix. ## OPTIONS <action> [--type=<type>] [--table=<table>] [--index=<index>] [--keep-index=<index>] [--option=<option>] [--limit=<rows>] [--change-id=<id>] [--backup-id=<id>] [--thread-id=<id>] [--transaction-id=<id>] [--backup-confirmed] [--danger-confirmed] [--data-loss-confirmed] [--rollback-confirmed] [--high-rollback-confirmed] [--force-large] */
     public function database_fix( $args, $assoc ) {
         $action = sanitize_key( (string) ( $args[0] ?? '' ) );
         if ( ! $action ) { WP_CLI::error( 'Provide a database repair action. Run wp performance database-repairs to see current recommendations.' ); }
         $repair_args = array();
-        foreach ( array( 'type','table','index','option','limit','change-id','backup-id','thread-id','transaction-id' ) as $key ) { if ( isset( $assoc[ $key ] ) ) { $repair_args[ str_replace( '-', '_', $key ) ] = $assoc[ $key ]; } }
+        // keep-index is required by drop_duplicate_index. Without it here the
+        // action was unreachable from WP-CLI even though the admin plan tells
+        // large-table operators to use the equivalent CLI repair.
+        foreach ( array( 'type','table','index','keep-index','option','limit','change-id','backup-id','thread-id','transaction-id' ) as $key ) { if ( isset( $assoc[ $key ] ) ) { $repair_args[ str_replace( '-', '_', $key ) ] = $assoc[ $key ]; } }
         if ( isset( $assoc['backup-confirmed'] ) ) { $repair_args['backup_confirmed'] = '1'; }
         if ( isset( $assoc['danger-confirmed'] ) ) { $repair_args['danger_confirmed'] = '1'; }
         if ( isset( $assoc['data-loss-confirmed'] ) ) { $repair_args['data_loss_confirmed'] = '1'; }
@@ -92,6 +95,12 @@ final class PFC_CLI {
         $result = PFC_Database_Repair::execute( $action, $repair_args, ! empty( $assoc['force-large'] ) );
         if ( is_wp_error( $result ) ) { WP_CLI::error( $result->get_error_message() ); }
         WP_CLI::log( wp_json_encode( $result, JSON_PRETTY_PRINT ) );
+        // A repair can complete without throwing and still report ok=false (for
+        // example an integrity check that found problems). Exit non-zero so
+        // automation does not read a failed repair as success.
+        if ( is_array( $result ) && array_key_exists( 'ok', $result ) && empty( $result['ok'] ) ) {
+            WP_CLI::error( (string) ( $result['message'] ?? 'The database repair did not succeed.' ), false );
+        }
         WP_CLI::success( $result['message'] ?? 'Database repair completed.' );
     }
 
@@ -114,7 +123,7 @@ final class PFC_CLI {
                 'waiting' => ! empty( $trx['is_waiting'] ) ? 'yes' : 'no',
                 'risk' => (string) ( $trx['risk'] ?? '' ),
                 'killable' => ! empty( $trx['can_terminate'] ) ? 'yes' : 'no',
-                'query' => mb_substr( (string) ( ( $trx['query'] ?? '' ) ?: ( $trx['process_info'] ?? '' ) ), 0, 180 ),
+                'query' => PFC_Utils::truncate( PFC_Utils::strip_control_chars( (string) ( ( $trx['query'] ?? '' ) ?: ( $trx['process_info'] ?? '' ) ) ), 180 ),
             );
         }
         if ( ! $rows ) { WP_CLI::success( 'No active InnoDB transactions are visible.' ); return; }
@@ -205,6 +214,7 @@ final class PFC_CLI {
 
     /** Profile a URL with signed deep requests. ## OPTIONS <url> [--runs=<runs>] */
     public function profile( $args, $assoc ) {
+        if ( ! isset( $args[0] ) ) { WP_CLI::error( 'Usage: wp performance profile <url> [--runs=<runs>]' ); }
         $url = $this->own_url( $args[0] );
         $runs = max( 1, min( 10, (int) ( $assoc['runs'] ?? 3 ) ) );
         $times = $this->timed( $url, '', $runs );
@@ -215,6 +225,7 @@ final class PFC_CLI {
 
     /** Estimate a plugin route impact using private signed exclusion requests. ## OPTIONS <url> <plugin-file> [--runs=<runs>] */
     public function plugin_impact( $args, $assoc ) {
+        if ( ! isset( $args[0], $args[1] ) ) { WP_CLI::error( 'Usage: wp performance plugin-impact <url> <plugin-file> [--runs=<runs>]' ); }
         $url = $this->own_url( $args[0] );
         $plugin = sanitize_text_field( $args[1] );
         if ( $plugin === PFC_BASENAME ) { WP_CLI::error( 'Performance Console cannot exclude itself.' ); }
@@ -274,6 +285,7 @@ final class PFC_CLI {
 
     /** Compare two stored run IDs. ## OPTIONS <run-a> <run-b> */
     public function compare( $args ) {
+        if ( ! isset( $args[0], $args[1] ) ) { WP_CLI::error( 'Usage: wp performance compare <run-a> <run-b>' ); }
         global $wpdb; $t=PFC_Utils::table('runs');
         $a=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$t} WHERE id=%d",(int)$args[0]),ARRAY_A); $b=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$t} WHERE id=%d",(int)$args[1]),ARRAY_A);
         if(!$a||!$b){WP_CLI::error('Run not found.');}

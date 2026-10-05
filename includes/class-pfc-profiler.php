@@ -2,6 +2,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class PFC_Profiler {
+    private const MAX_SAVE_CALLBACK_TIMING_ROWS = 200;
     private static $start = 0.0;
     private static $http = array();
     private static $http_starts = array();
@@ -10,6 +11,12 @@ final class PFC_Profiler {
     private static $hook_totals = array();
     private static $option_hits = array();
     private static $saved_posts = array();
+    private static $save_callback_timings = array();
+    private static $save_callback_origins = array();
+    private static $instrumenting_save_callbacks = false;
+    private static $save_callback_timing_dropped = 0;
+    private static $save_callback_skipped_reference = array();
+    private static $save_callback_skipped_reference_dropped = 0;
 
     public static function init() {
         global $wpdb;
@@ -61,7 +68,164 @@ final class PFC_Profiler {
                 add_filter( $hook, array( __CLASS__, 'filter_stop' ), PHP_INT_MAX );
             }
             add_action( 'init', array( __CLASS__, 'register_dynamic_save_timers' ), PHP_INT_MAX - 1 );
+            if ( self::is_metabox_capture() ) {
+                add_action( 'all', array( __CLASS__, 'instrument_save_callbacks' ), PHP_INT_MAX, 1 );
+            }
         }
+    }
+
+    /**
+     * Wrap selected callback entries only during the signed, one-shot metabox capture.
+     * The original WP_Hook key, priority and accepted-argument count remain intact.
+     *
+     * @param mixed $hook_name Name passed as the first argument to the `all` hook.
+     */
+    public static function instrument_save_callbacks( $hook_name ) {
+        // Label and component helpers can dispatch filters that re-enter `all`.
+        if ( self::$instrumenting_save_callbacks ) {
+            return;
+        }
+        if ( ! self::is_metabox_capture() || ! self::is_save_callback_hook( (string) $hook_name ) ) {
+            return;
+        }
+
+        global $wp_filter;
+        $hook_name = (string) $hook_name;
+        if ( empty( $wp_filter[ $hook_name ] ) || ! ( $wp_filter[ $hook_name ] instanceof WP_Hook ) ) {
+            return;
+        }
+
+        self::$instrumenting_save_callbacks = true;
+        try {
+            foreach ( $wp_filter[ $hook_name ]->callbacks as $priority => &$priority_callbacks ) {
+                foreach ( $priority_callbacks as $callback_id => &$registered ) {
+                    $callback = $registered['function'] ?? null;
+                    if ( ! is_callable( $callback ) || self::is_profiler_callback( $callback ) ) {
+                        continue;
+                    }
+
+                    $existing_origin = self::save_callback_origin( $hook_name, $priority, $callback_id, $callback );
+                    if ( null !== $existing_origin ) {
+                        continue;
+                    }
+
+                    $label = self::callback_label( $callback, $has_reference_parameter );
+                    if ( $has_reference_parameter ) {
+                        $skip_key = md5( $hook_name . "\0" . (int) $priority . "\0" . (string) $callback_id );
+                        if ( ! isset( self::$save_callback_skipped_reference[ $skip_key ] ) ) {
+                            if ( count( self::$save_callback_skipped_reference ) < self::MAX_SAVE_CALLBACK_TIMING_ROWS ) {
+                                self::$save_callback_skipped_reference[ $skip_key ] = true;
+                            } else {
+                                ++self::$save_callback_skipped_reference_dropped;
+                            }
+                        }
+                        continue;
+                    }
+
+                    $component = self::callback_component( $callback );
+                    $component_key = sanitize_key( (string) ( $component['type'] ?? 'core' ) ) . ':' . sanitize_key( (string) ( $component['slug'] ?? 'wordpress' ) );
+                    $row_key = md5( $hook_name . "\0" . (int) $priority . "\0" . $label . "\0" . $component_key );
+                    $wrapper = static function ( ...$args ) use ( $callback, $hook_name, $priority, $label, $component_key, $row_key ) {
+                        $started = microtime( true );
+                        try {
+                            return call_user_func_array( $callback, $args );
+                        } finally {
+                            try {
+                                PFC_Profiler::record_save_callback_timing( $row_key, $hook_name, $label, $component_key, (int) $priority, ( microtime( true ) - $started ) * 1000 );
+                            } catch ( Throwable $ignored ) {
+                                // Diagnostic recording must never alter the save callback result or exception.
+                            }
+                        }
+                    };
+
+                    self::$save_callback_origins[ $hook_name ][ $priority ][ $callback_id ] = array(
+                        'wrapper' => $wrapper,
+                        'callback' => $callback,
+                        'component' => $component,
+                    );
+                    $registered['function'] = $wrapper;
+                }
+                unset( $registered );
+            }
+            unset( $priority_callbacks );
+        } finally {
+            self::$instrumenting_save_callbacks = false;
+        }
+    }
+
+    private static function is_metabox_capture() {
+        if ( ! defined( 'PFC_SAVE_DIAGNOSTIC' ) || ! PFC_SAVE_DIAGNOSTIC ) {
+            return false;
+        }
+        $context = (array) ( $GLOBALS['pfc_save_capture'] ?? array() );
+        return 'metabox' === ( $context['requested_kind'] ?? '' ) && 'classic-metabox-save' === ( $context['kind'] ?? '' );
+    }
+
+    private static function is_save_callback_hook( string $hook_name ) {
+        $fixed = array( 'wp_after_insert_post', 'save_post', 'save_post_revision', 'added_post_meta', 'updated_post_meta', 'deleted_post_meta', 'clean_post_cache' );
+        if ( in_array( $hook_name, $fixed, true ) ) {
+            return true;
+        }
+        $context = (array) ( $GLOBALS['pfc_save_capture'] ?? array() );
+        // MU request matching already sanitized this value; avoid sanitize_key()
+        // here because its filter would recursively dispatch the `all` hook.
+        $post_type = (string) ( $context['post_type'] ?? '' );
+        return '' !== $post_type && 1 === preg_match( '/^[a-z0-9_-]+$/D', $post_type ) && 'save_post_' . $post_type === $hook_name;
+    }
+
+    private static function is_profiler_callback( $callback ) {
+        if ( is_string( $callback ) && false !== strpos( $callback, '::' ) ) {
+            return __CLASS__ === explode( '::', $callback, 2 )[0];
+        }
+        return is_array( $callback ) && isset( $callback[0] ) && ( __CLASS__ === $callback[0] || ( is_object( $callback[0] ) && __CLASS__ === get_class( $callback[0] ) ) );
+    }
+
+    /** @return string Safe callback label; parameters and source paths are never included. */
+    private static function callback_label( $callback, &$has_reference_parameter ) {
+        $has_reference_parameter = true;
+        try {
+            if ( is_array( $callback ) && 2 === count( $callback ) ) {
+                $reflection = new ReflectionMethod( $callback[0], $callback[1] );
+                $name = ( is_object( $callback[0] ) ? get_class( $callback[0] ) : (string) $callback[0] ) . '::' . (string) $callback[1];
+            } elseif ( is_string( $callback ) && false !== strpos( $callback, '::' ) ) {
+                list( $class, $method ) = explode( '::', $callback, 2 );
+                $reflection = new ReflectionMethod( $class, $method );
+                $name = $class . '::' . $method;
+            } elseif ( is_object( $callback ) && ! $callback instanceof Closure ) {
+                $reflection = new ReflectionMethod( $callback, '__invoke' );
+                $name = get_class( $callback ) . '::__invoke';
+            } else {
+                $reflection = new ReflectionFunction( $callback );
+                $name = $reflection->isClosure() ? 'closure@' . (int) $reflection->getStartLine() : $reflection->getName();
+            }
+            foreach ( $reflection->getParameters() as $parameter ) {
+                if ( $parameter->isPassedByReference() ) {
+                    return sanitize_text_field( substr( $name, 0, 160 ) );
+                }
+            }
+            $has_reference_parameter = false;
+            return sanitize_text_field( substr( $name, 0, 160 ) );
+        } catch ( Throwable $error ) {
+            return 'unresolved callable';
+        }
+    }
+
+    private static function save_callback_origin( string $hook, $priority, $callback_id, $callback ) {
+        $origin = self::$save_callback_origins[ $hook ][ $priority ][ $callback_id ] ?? null;
+        return is_array( $origin ) && isset( $origin['wrapper'] ) && $origin['wrapper'] === $callback ? $origin : null;
+    }
+
+    private static function record_save_callback_timing( string $key, string $hook, string $label, string $component, int $priority, float $elapsed ): void {
+        if ( ! isset( self::$save_callback_timings[ $key ] ) ) {
+            if ( count( self::$save_callback_timings ) >= self::MAX_SAVE_CALLBACK_TIMING_ROWS ) {
+                ++self::$save_callback_timing_dropped;
+                return;
+            }
+            self::$save_callback_timings[ $key ] = array( 'hook' => $hook, 'callback' => $label, 'component' => $component, 'priority' => $priority, 'calls' => 0, 'total_ms' => 0.0, 'max_ms' => 0.0 );
+        }
+        ++self::$save_callback_timings[ $key ]['calls'];
+        self::$save_callback_timings[ $key ]['total_ms'] += max( 0.0, $elapsed );
+        self::$save_callback_timings[ $key ]['max_ms'] = max( self::$save_callback_timings[ $key ]['max_ms'], $elapsed );
     }
 
     public static function record_saved_post( $post_id, $post ) {
@@ -221,6 +385,19 @@ final class PFC_Profiler {
             );
             $run_payload['save_components'] = self::save_component_totals( $queries_by_pattern, self::$http );
             $run_payload['save_hook_components'] = self::save_hook_components();
+            if ( self::is_metabox_capture() ) {
+                $callback_rows = array_values( self::$save_callback_timings );
+                usort( $callback_rows, static function ( $a, $b ) { return $b['total_ms'] <=> $a['total_ms']; } );
+                $run_payload['save_callback_timings'] = array_map( static function ( $row ) {
+                    $row['total_ms'] = round( (float) $row['total_ms'], 3 );
+                    $row['max_ms'] = round( (float) $row['max_ms'], 3 );
+                    return $row;
+                }, $callback_rows );
+                $run_payload['save_callback_timings_truncated'] = self::$save_callback_timing_dropped > 0;
+                $run_payload['save_callback_timing_rows_dropped'] = self::$save_callback_timing_dropped;
+                $run_payload['save_callback_reference_callbacks_skipped'] = count( self::$save_callback_skipped_reference );
+                $run_payload['save_callback_reference_callbacks_skipped_truncated'] = self::$save_callback_skipped_reference_dropped > 0;
+            }
         }
 
         $wpdb->insert( PFC_Utils::table( 'runs' ), array(
@@ -287,12 +464,12 @@ final class PFC_Profiler {
             if ( ! empty( $trace_map[ $hash ] ) ) { $trace = array_shift( $trace_map[ $hash ] ); }
             $component = PFC_Utils::component_from_trace( $trace );
             $item = array(
-                'error' => sanitize_text_field( mb_substr( (string) ( $error['error_str'] ?? 'Database error' ), 0, 500 ) ),
+                'error' => sanitize_text_field( PFC_Utils::truncate( (string) ( $error['error_str'] ?? 'Database error' ), 0, 500 ) ),
                 'query' => PFC_Utils::normalize_sql( $sql ),
                 'component' => $component,
             );
             $out[] = $item;
-            PFC_Utils::issue( 'database', 'critical', 'Database query error from ' . $component['slug'], esc_html( $item['error'] ) . '<br><code>' . esc_html( mb_substr( $item['query'], 0, 900 ) ) . '</code>', 'Query failed', 'Fix the SQL/schema/plugin error before performance tuning. Repeated failed queries can create retries and expensive fallback behaviour.', PFC_Utils::route() );
+            PFC_Utils::issue( 'database', 'critical', 'Database query error from ' . $component['slug'], esc_html( $item['error'] ) . '<br><code>' . esc_html( PFC_Utils::truncate( $item['query'], 900 ) ) . '</code>', 'Query failed', 'Fix the SQL/schema/plugin error before performance tuning. Repeated failed queries can create retries and expensive fallback behaviour.', PFC_Utils::route() );
         }
         return $out;
     }
@@ -336,7 +513,7 @@ final class PFC_Profiler {
             if ( $analysis['problem'] ) {
                 $severity = ( $p['total'] >= 500 || $p['max'] >= 500 || $analysis['rows_examined_estimate'] >= 1000000 ) ? 'critical' : 'high';
                 $details = array_filter( $analysis['reasons'] );
-                PFC_Utils::issue( 'database', $severity, 'Expensive query from ' . $c['slug'], '<code>' . esc_html( mb_substr( $p['sql'], 0, 1200 ) ) . '</code><br>' . esc_html( implode( '; ', $details ) ), round( $p['total'] ) . ' ms total / ' . intval( $p['count'] ) . ' calls', self::query_recommendation( $analysis ), $route );
+                PFC_Utils::issue( 'database', $severity, 'Expensive query from ' . $c['slug'], '<code>' . esc_html( PFC_Utils::truncate( $p['sql'], 1200 ) ) . '</code><br>' . esc_html( implode( '; ', $details ) ), round( $p['total'] ) . ' ms total / ' . intval( $p['count'] ) . ' calls', self::query_recommendation( $analysis ), $route );
             }
         }
     }
@@ -520,11 +697,15 @@ final class PFC_Profiler {
             if ( empty( $wp_filter[ $hook ] ) || empty( $wp_filter[ $hook ]->callbacks ) ) { continue; }
             $components = array();
             $callbacks = 0;
-            foreach ( $wp_filter[ $hook ]->callbacks as $priority_callbacks ) {
-                foreach ( $priority_callbacks as $registered ) {
+            foreach ( $wp_filter[ $hook ]->callbacks as $priority => $priority_callbacks ) {
+                foreach ( $priority_callbacks as $callback_id => $registered ) {
                     $callback = $registered['function'] ?? '';
+                    $origin = self::save_callback_origin( $hook, $priority, $callback_id, $callback );
+                    if ( null !== $origin ) {
+                        $callback = $origin['callback'];
+                    }
                     if ( is_array( $callback ) && ( ( is_string( $callback[0] ) && __CLASS__ === $callback[0] ) || ( is_object( $callback[0] ) && __CLASS__ === get_class( $callback[0] ) ) ) ) { continue; }
-                    $component = self::callback_component( $callback );
+                    $component = null !== $origin ? $origin['component'] : self::callback_component( $callback );
                     $key = sanitize_key( (string) ( $component['type'] ?? 'core' ) ) . ':' . sanitize_key( (string) ( $component['slug'] ?? 'wordpress' ) );
                     $components[ $key ] = ( $components[ $key ] ?? 0 ) + 1;
                     $callbacks++;
@@ -615,7 +796,7 @@ final class PFC_Profiler {
         $last = error_get_last();
         if ( ! is_array( $last ) || ! in_array( (int) $last['type'], array( E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR ), true ) ) { return; }
         $component = PFC_Utils::component_from_file( $last['file'] ?? '' );
-        PFC_Utils::issue( 'errors', 'critical', 'Fatal PHP error during sampled request', '<code>' . esc_html( $component['type'] . ':' . $component['slug'] ) . '</code><br>' . esc_html( mb_substr( (string) $last['message'], 0, 700 ) ), 'Request may fail completely', 'Fix the fatal error before performance tuning. Repeated fatals can also prevent cron, cache warming and background jobs from completing.', $route );
+        PFC_Utils::issue( 'errors', 'critical', 'Fatal PHP error during sampled request', '<code>' . esc_html( $component['type'] . ':' . $component['slug'] ) . '</code><br>' . esc_html( PFC_Utils::truncate( (string) $last['message'], 700 ) ), 'Request may fail completely', 'Fix the fatal error before performance tuning. Repeated fatals can also prevent cron, cache warming and background jobs from completing.', $route );
     }
 
     public static function site_health( $tests ) {

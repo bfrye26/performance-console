@@ -66,10 +66,13 @@ final class PFC_Job_Health {
         global $wpdb;
         $actions = $wpdb->prefix . 'actionscheduler_actions';
         $logs = $wpdb->prefix . 'actionscheduler_logs';
-        $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $actions ) );
+        // esc_like() because "_" is a single-character LIKE wildcard: unescaped,
+        // "wp_actionscheduler_actions" also matches a table such as
+        // "wpxactionschedulerxactions".
+        $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $actions ) ) );
         if ( $exists !== $actions ) { return array( 'available' => false ); }
 
-        $status = $wpdb->get_row( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $actions ), ARRAY_A );
+        $status = $wpdb->get_row( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $wpdb->esc_like( $actions ) ), ARRAY_A );
         $estimate = (int) ( $status['Rows'] ?? 0 );
         $out = array( 'available' => true, 'rows_estimate' => $estimate, 'bounded' => false );
 
@@ -84,13 +87,17 @@ final class PFC_Job_Health {
         $out['failed'] = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$actions}` WHERE status='failed'" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $out['in_progress'] = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$actions}` WHERE status='in-progress'" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $out['past_due'] = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM `{$actions}` WHERE status='pending' AND scheduled_date_gmt < %s", gmdate( 'Y-m-d H:i:s', time() - 300 ) ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        // A failed or killed COUNT(*) returns null, and (int) null is 0, which
+        // would be reported as a healthy empty queue. Record the failure so the
+        // verdict can be "unverifiable" instead of a false all-clear.
+        if ( '' !== (string) $wpdb->last_error ) { $out['query_error'] = sanitize_text_field( $wpdb->last_error ); }
         $out['oldest_pending'] = $wpdb->get_var( "SELECT MIN(scheduled_date_gmt) FROM `{$actions}` WHERE status='pending'" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $out['top_pending_hooks'] = $wpdb->get_results( "SELECT hook,COUNT(*) total FROM `{$actions}` WHERE status='pending' GROUP BY hook ORDER BY total DESC LIMIT 30", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         $out['top_failed_hooks'] = $wpdb->get_results( "SELECT hook,COUNT(*) total FROM `{$actions}` WHERE status='failed' GROUP BY hook ORDER BY total DESC LIMIT 30", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-        $log_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $logs ) );
+        $log_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $logs ) ) );
         if ( $log_exists === $logs ) {
-            $log_status = $wpdb->get_row( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $logs ), ARRAY_A );
+            $log_status = $wpdb->get_row( $wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $wpdb->esc_like( $logs ) ), ARRAY_A );
             $out['log_rows_estimate'] = (int) ( $log_status['Rows'] ?? 0 );
             $out['log_size'] = (int) ( $log_status['Data_length'] ?? 0 ) + (int) ( $log_status['Index_length'] ?? 0 );
         }
@@ -112,7 +119,7 @@ final class PFC_Job_Health {
         if ( $cron['severely_overdue'] > 25 ) {
             PFC_Utils::issue( 'cron', 'high', 'WP-Cron contains severely overdue events', number_format_i18n( $cron['severely_overdue'] ) . ' events are more than one hour overdue.', number_format_i18n( $cron['severely_overdue'] ), 'Test the top overdue hooks with WP-CLI and verify that a real server cron is configured if DISABLE_WP_CRON is enabled.' );
         }
-        if ( $cron['cron_option_size'] > MB_IN_BYTES ) {
+        if ( $cron['cron_option_size'] > PFC_Utils::MB_IN_BYTES ) {
             PFC_Utils::issue( 'cron', 'high', 'Cron schedule option is abnormally large', 'The serialized cron option is approximately ' . esc_html( size_format( $cron['cron_option_size'] ) ) . '.', size_format( $cron['cron_option_size'] ), 'Look for plugins creating duplicate single events or failing to unschedule old events. Do not manually edit the cron option.' );
         }
         foreach ( $cron['short_intervals'] as $hook => $seconds ) {
@@ -133,7 +140,7 @@ final class PFC_Job_Health {
         if ( $failed > 100 ) {
             PFC_Utils::issue( 'jobs', 'high', 'Action Scheduler has a large failed queue', number_format_i18n( $failed ) . ' failed actions were found.', number_format_i18n( $failed ) . ' failed', 'Inspect the top failed hooks and their logs. Repeated failures can continuously consume cron/DB resources.' );
         }
-        if ( isset( $as['log_size'] ) && $as['log_size'] > 2 * GB_IN_BYTES ) {
+        if ( isset( $as['log_size'] ) && $as['log_size'] > 2 * PFC_Utils::GB_IN_BYTES ) {
             PFC_Utils::issue( 'jobs', 'warning', 'Action Scheduler log table is very large', 'The Action Scheduler logs use approximately ' . esc_html( size_format( $as['log_size'] ) ) . '.', size_format( $as['log_size'] ), 'Use the owning plugin/WooCommerce retention mechanisms to prune old completed action logs in controlled batches.' );
         }
     }

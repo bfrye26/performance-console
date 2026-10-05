@@ -250,7 +250,7 @@ final class PFC_Database_Repair {
         foreach ( array_slice( (array) ( $schema['tables'] ?? array() ), 0, 75 ) as $table ) {
             $size = (int) ( $table['size'] ?? 0 );
             $free = (int) ( $table['data_free'] ?? 0 );
-            if ( $size < 100 * MB_IN_BYTES || $free < max( 100 * MB_IN_BYTES, (int) ( $size * 0.25 ) ) ) { continue; }
+            if ( $size < 100 * PFC_Utils::MB_IN_BYTES || $free < max( 100 * PFC_Utils::MB_IN_BYTES, (int) ( $size * 0.25 ) ) ) { continue; }
             $engine = strtolower( (string) ( $table['engine'] ?? '' ) );
             $caps = self::engine_capabilities_for_health( $health, $engine );
             if ( empty( $caps['optimize'] ) ) { continue; }
@@ -1260,7 +1260,7 @@ final class PFC_Database_Repair {
     private static function disk_space_preflight( array $meta, $operation ) {
         global $wpdb;
         $size = max( 1, (int) ( $meta['size'] ?? 0 ) );
-        $required = 'table' === $operation ? (int) ceil( $size * 2.2 ) : (int) ceil( max( $size * 0.75, 512 * MB_IN_BYTES ) );
+        $required = 'table' === $operation ? (int) ceil( $size * 2.2 ) : (int) ceil( max( $size * 0.75, 512 * PFC_Utils::MB_IN_BYTES ) );
         $old = $wpdb->suppress_errors( true );
         $datadir = (string) $wpdb->get_var( 'SELECT @@datadir' );
         $wpdb->suppress_errors( $old );
